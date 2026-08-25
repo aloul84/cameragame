@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>التوأم الرقمي - قلّد حركاتي</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #0b0c10; /* خلفية داكنة جداً */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* نافذة الكاميرا المصغرة لمعرفة مكان اللاعب */
+        #cameraContainer {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 160px;
+            height: 120px;
+            border: 3px solid #66fcf1;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 15px rgba(102, 252, 241, 0.5);
+            background: #000;
+            z-index: 10;
+        }
+
+        #videoElement {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* عكس الكاميرا كالمرآة */
+            opacity: 0.7; /* جعلها شفافة قليلاً لعدم التشتيت */
+        }
+
+        /* شاشات واجهة المستخدم */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(11, 12, 16, 0.9);
+            color: white;
+            z-index: 20;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            margin-bottom: 15px;
+            color: #66fcf1;
+            text-shadow: 0 0 10px rgba(102, 252, 241, 0.7);
+        }
+
+        p {
+            font-size: 1.5rem;
+            margin-bottom: 30px;
+            color: #c5c6c7;
+            max-width: 80%;
+            line-height: 1.6;
+        }
+
+        button {
+            padding: 15px 50px;
+            font-size: 1.8rem;
+            background-color: #45a29e;
+            color: #fff;
+            border: 2px solid #66fcf1;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(102, 252, 241, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #66fcf1;
+            color: #0b0c10;
+            box-shadow: 0 0 25px rgba(102, 252, 241, 0.8);
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        .hidden { display: none !important; }
+
+        .loader {
+            border: 5px solid rgba(255,255,255,0.1);
+            border-top: 5px solid #66fcf1;
+            border-radius: 50%;
+            width: 70px;
+            height: 70px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 25px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* رسالة التحذير عند خروج اللاعب من الكاميرا */
+        #warningMsg {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            z-index: 15;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="uiOverlay" class="overlay">
+        <div id="loader" class="loader"></div>
+        <h1 id="uiTitle">تجهيز الذكاء الاصطناعي...</h1>
+        <p id="uiDesc">ننتظر موافقتك لتشغيل الكاميرا الأمامية.</p>
+        <button id="startBtn" class="hidden">العب الآن</button>
+    </div>
+
+    <div id="warningMsg">يرجى الوقوف أمام الكاميرا بالكامل!</div>
+
+    <!-- نافذة الكاميرا -->
+    <div id="cameraContainer">
+        <video id="videoElement" autoplay playsinline></video>
+    </div>
+    
+    <!-- اللوحة التي سيُرسم عليها الشخصية الرقمية -->
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const videoElement = document.getElementById('videoElement');
+        const uiOverlay = document.getElementById('uiOverlay');
+        const uiTitle = document.getElementById('uiTitle');
+        const uiDesc = document.getElementById('uiDesc');
+        const loader = document.getElementById('loader');
+        const startBtn = document.getElementById('startBtn');
+        const warningMsg = document.getElementById('warningMsg');
+
+        // إعداد أبعاد الشاشة
+        let width, height;
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        let gameState = 'INIT';
+        let latestLandmarks = null;
+
+        // مصفوفة لتنعيم الحركة (Smooth Interpolation)
+        let smoothedLandmarks = []; 
+        for(let i=0; i<33; i++) {
+            smoothedLandmarks.push({x: 0.5, y: 0.5});
+        }
+
+        function initAI() {
+            const pose = new Pose({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+            });
+
+            pose.setOptions({
+                modelComplexity: 1, // دقة أعلى لضمان تتبع كل أطراف الجسم
+                smoothLandmarks: true,
+                enableSegmentation: false,
+                minDetectionConfidence: 0.6,
+                minTrackingConfidence: 0.6
+            });
+
+            pose.onResults(onPoseResults);
+
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    if (gameState === 'PLAYING') {
+                        await pose.send({image: videoElement});
+                    }
+                },
+                width: 640,
+                height: 480,
+                facingMode: 'user'
+            });
+
+            camera.start()
+                .then(() => {
+                    uiTitle.innerText = "جاهزون للعب!";
+                    uiDesc.innerHTML = "ابتعد عن الكاميرا حتى يظهر جسمك بالكامل.<br>الشخصية ستقوم بتقليد كل حركاتك!";
+                    loader.classList.add('hidden');
+                    startBtn.classList.remove('hidden');
+                })
+                .catch((err) => {
+                    uiTitle.innerText = "تعذر فتح الكاميرا";
+                    uiTitle.style.color = "#ff5252";
+                    uiDesc.innerHTML = "يرجى التأكد من السماح للمتصفح باستخدام الكاميرا.";
+                    loader.classList.add('hidden');
+                });
+        }
+
+        function onPoseResults(results) {
+            if (results.poseLandmarks) {
+                latestLandmarks = results.poseLandmarks;
+                warningMsg.style.display = 'none';
+            } else {
+                // إذا فقدت الكاميرا رؤية اللاعب
+                warningMsg.style.display = 'block';
+            }
+        }
+
+        startBtn.addEventListener('click', () => {
+            uiOverlay.classList.add('hidden');
+            gameState = 'PLAYING';
+            // بدء حلقة الرسم للعبة
+            requestAnimationFrame(gameLoop);
+        });
+
+        // تشغيل الذكاء الاصطناعي عند فتح الصفحة
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            initAI();
+        } else {
+            uiTitle.innerText = "المتصفح غير مدعوم";
+            loader.classList.add('hidden');
+        }
+
+        function getPoint(index) {
+            let target = latestLandmarks[index];
+            // تنعيم الحركة (Interpolation) لكي لا ترتجف الشخصية
+            smoothedLandmarks[index].x += (target.x - smoothedLandmarks[index].x) * 0.3;
+            smoothedLandmarks[index].y += (target.y - smoothedLandmarks[index].y) * 0.3;
+
+            // تحويل النقاط من (0-1) إلى أبعاد الشاشة
+            // (1 - x) لأننا نعكس الصورة لتكون مرآة!
+            return {
+                x: (1 - smoothedLandmarks[index].x) * width,
+                y: smoothedLandmarks[index].y * height
+            };
+        }
+
+        function drawLine(p1, p2, color = '#66fcf1', lineWidth = 12) {
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineWidth;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 15; // تأثير الإضاءة (Neon Effect)
+            ctx.stroke();
+            ctx.shadowBlur = 0; // إعادة التعيين
+        }
+
+        function drawCircle(p, radius, color = '#ffffff') {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 20;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawBackground() {
+            ctx.fillStyle = '#0b0c10';
+            ctx.fillRect(0, 0, width, height);
+
+            // رسم شبكة (Grid) في الخلفية لتعطي طابع الخيال العلمي
+            ctx.strokeStyle = 'rgba(102, 252, 241, 0.05)';
+            ctx.lineWidth = 1;
+            
+            for (let i = 0; i < width; i += 50) {
+                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
+            }
+            for (let i = 0; i < height; i += 50) {
+                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke();
+            }
+        }
+
+        function drawAvatar() {
+            if (!latestLandmarks) return;
+
+            // استخراج أهم مفاصل الجسم من MediaPipe
+            // 0: الأنف، 11/12: الأكتاف، 13/14: الأكواع، 15/16: الرسغ
+            // 23/24: الحوض، 25/26: الركب، 27/28: الكاحل
+
+            const nose = getPoint(0);
+            
+            // الجزء العلوي
+            const leftShoulder = getPoint(12); // معكوسة بسبب المرآة
+            const rightShoulder = getPoint(11);
+            const leftElbow = getPoint(14);
+            const rightElbow = getPoint(13);
+            const leftWrist = getPoint(16);
+            const rightWrist = getPoint(15);
+            
+            // الجزء السفلي
+            const leftHip = getPoint(24);
+            const rightHip = getPoint(23);
+            const leftKnee = getPoint(26);
+            const rightKnee = getPoint(25);
+            const leftAnkle = getPoint(28);
+            const rightAnkle = getPoint(27);
+
+            // 1. رسم الجسم (الجذع)
+            drawLine(leftShoulder, rightShoulder, '#1f2833', 25);
+            drawLine(leftHip, rightHip, '#1f2833', 25);
+            drawLine(leftShoulder, leftHip, '#45a29e', 20);
+            drawLine(rightShoulder, rightHip, '#45a29e', 20);
+
+            // 2. رسم الأذرع
+            drawLine(leftShoulder, leftElbow, '#66fcf1', 15);
+            drawLine(leftElbow, leftWrist, '#66fcf1', 12);
+            
+            drawLine(rightShoulder, rightElbow, '#66fcf1', 15);
+            drawLine(rightElbow, rightWrist, '#66fcf1', 12);
+
+            // 3. رسم الأرجل
+            drawLine(leftHip, leftKnee, '#45a29e', 18);
+            drawLine(leftKnee, leftAnkle, '#45a29e', 15);
+            
+            drawLine(rightHip, rightKnee, '#45a29e', 18);
+            drawLine(rightKnee, rightAnkle, '#45a29e', 15);
+
+            // 4. رسم المفاصل (الدوائر البيضاء)
+            const joints = [
+                leftShoulder, rightShoulder, leftElbow, rightElbow, 
+                leftWrist, rightWrist, leftHip, rightHip, 
+                leftKnee, rightKnee, leftAnkle, rightAnkle
+            ];
+            
+            for (let joint of joints) {
+                drawCircle(joint, 8, '#ffffff');
+            }
+
+            // 5. رسم الرأس (خوذة أليكترونية)
+            // استخدام المسافة بين الأكتاف لتحديد حجم الرأس
+            const headSize = Math.abs(leftShoulder.x - rightShoulder.x) * 0.4;
+            drawCircle(nose, Math.max(30, headSize), '#c5c6c7');
+            
+            // رسم عيون مضيئة للشخصية
+            drawCircle({x: nose.x - 15, y: nose.y - 10}, 6, '#66fcf1');
+            drawCircle({x: nose.x + 15, y: nose.y - 10}, 6, '#66fcf1');
+        }
+
+        function gameLoop() {
+            if (gameState === 'PLAYING') {
+                ctx.clearRect(0, 0, width, height);
+                
+                // رسم الخلفية
+                drawBackground();
+
+                // رسم التوأم الرقمي
+                drawAvatar();
+                
+                // إضافة نص تعليمات في أعلى الشاشة
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.font = '24px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('اقفز، اركض، وحرك يديك! الشخصية ستقلدك تماماً', width / 2, 40);
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

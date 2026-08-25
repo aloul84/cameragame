@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>لعبة التحكم بالإصبع</title>
+    <!-- استدعاء مكتبات MediaPipe Hands لتحليل حركة اليد -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #87CEEB;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #cameraContainer {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 160px;
+            height: 120px;
+            border: 4px solid white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            background: #000;
+            z-index: 10;
+        }
+
+        #videoElement {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            z-index: 20;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            color: #ffeb3b;
+        }
+
+        p {
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            max-width: 80%;
+            line-height: 1.5;
+        }
+
+        .error-text {
+            color: #ff5252;
+            font-weight: bold;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            border-radius: 8px;
+            direction: ltr;
+        }
+
+        button {
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            background-color: #ff5722;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            margin-top: 15px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .loader {
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #ff5722;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #fingerPointer {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background-color: rgba(255, 0, 0, 0.6);
+            border-radius: 50%;
+            border: 2px solid white;
+            pointer-events: none;
+            z-index: 15;
+            transition: top 0.1s, left 0.1s;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="uiOverlay" class="overlay">
+        <div id="loader" class="loader"></div>
+        <h1 id="uiTitle">جاري تحميل اللعبة...</h1>
+        <p id="uiDesc">ننتظر موافقتك لتشغيل الكاميرا الأمامية.</p>
+        <button id="startBtn" class="hidden">ابدأ اللعب</button>
+        <button id="retryBtn" class="hidden" onclick="location.reload()">تحديث الصفحة</button>
+    </div>
+
+    <div id="cameraContainer">
+        <video id="videoElement" autoplay playsinline></video>
+    </div>
+    
+    <div id="fingerPointer"></div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const videoElement = document.getElementById('videoElement');
+        const uiOverlay = document.getElementById('uiOverlay');
+        const uiTitle = document.getElementById('uiTitle');
+        const uiDesc = document.getElementById('uiDesc');
+        const loader = document.getElementById('loader');
+        const startBtn = document.getElementById('startBtn');
+        const retryBtn = document.getElementById('retryBtn');
+        const fingerPointer = document.getElementById('fingerPointer');
+
+        let isGameRunning = false;
+        let score = 0;
+        let frameCount = 0;
+        let gameState = 'INIT';
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        const groundHeight = 100;
+        const groundY = canvas.height - groundHeight;
+
+        const player = {
+            x: canvas.width * 0.15,
+            y: groundY - 80,
+            width: 50,
+            height: 80,
+            normalHeight: 80,
+            duckHeight: 40,
+            vy: 0,
+            gravity: 0.8,
+            jumpPower: -16,
+            isJumping: false,
+            isDucking: false,
+            color: '#FFD700'
+        };
+
+        let obstacles = [];
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        // ------------------ التحقق المسبق من الكاميرا ------------------
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            uiTitle.innerText = "المتصفح غير مدعوم!";
+            uiDesc.innerHTML = "متصفحك الحالي لا يدعم تشغيل الكاميرا. <br> الرجاء استخدام متصفح Google Chrome وفتح الملف مباشرة.";
+            loader.classList.add('hidden');
+        } else {
+            initMediaPipe();
+        }
+
+        // ------------------ إعداد MediaPipe Hands ------------------
+        function initMediaPipe() {
+            const hands = new Hands({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }
+            });
+
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 0,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults(onHandResults);
+
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({image: videoElement});
+                },
+                width: 640,
+                height: 480,
+                facingMode: 'user'
+            });
+
+            camera.start()
+                .then(() => {
+                    uiTitle.innerText = "تم بنجاح!";
+                    uiDesc.innerText = "وجه يدك نحو الكاميرا. ارفع إصبعك للقفز، وأنزله للجلوس.";
+                    loader.classList.add('hidden');
+                    startBtn.classList.remove('hidden');
+                })
+                .catch((err) => {
+                    // عرض رسالة الخطأ الدقيقة لتسهيل الحل
+                    uiTitle.innerText = "تعذر فتح الكاميرا 😔";
+                    let errorMsg = err.name || err.message || String(err);
+                    
+                    if(errorMsg.includes('NotAllowedError')) {
+                        uiDesc.innerHTML = "لقد قمت برفض صلاحية الكاميرا. <br> اضغط على القفل 🔒 بجانب الرابط واسمح للكاميرا بالعمل.";
+                    } else if (errorMsg.includes('NotFoundError')) {
+                        uiDesc.innerHTML = "لم يتم العثور على كاميرا في جهازك.";
+                    } else {
+                        uiDesc.innerHTML = `الرجاء التأكد من الصلاحيات وتجربة المتصفح المباشر. <br><br> <span class="error-text">تفاصيل الخطأ: ${errorMsg}</span>`;
+                    }
+                    
+                    loader.classList.add('hidden');
+                    retryBtn.classList.remove('hidden');
+                    console.error("Camera Error:", err);
+                });
+        }
+
+        startBtn.addEventListener('click', () => {
+            uiOverlay.classList.add('hidden');
+            startGame();
+        });
+
+        // ------------------ التحكم بالإصبع ------------------
+        function onHandResults(results) {
+            if (gameState !== 'PLAYING') {
+                fingerPointer.style.display = 'none';
+                return;
+            }
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const hand = results.multiHandLandmarks[0];
+                const indexFinger = hand[8];
+                const fingerY = indexFinger.y;
+                
+                fingerPointer.style.display = 'block';
+                const screenX = (1 - indexFinger.x) * window.innerWidth;
+                const screenY = indexFinger.y * window.innerHeight;
+                fingerPointer.style.left = `${screenX}px`;
+                fingerPointer.style.top = `${screenY}px`;
+
+                if (fingerY < 0.35) {
+                    if (!player.isJumping && !player.isDucking) {
+                        player.vy = player.jumpPower;
+                        player.isJumping = true;
+                    }
+                } else if (fingerY > 0.65) {
+                    if (!player.isJumping) {
+                        player.isDucking = true;
+                        player.height = player.duckHeight;
+                    }
+                } else {
+                    if (player.isDucking) {
+                        player.isDucking = false;
+                        player.height = player.normalHeight;
+                    }
+                }
+            } else {
+                fingerPointer.style.display = 'none';
+                if (player.isDucking) {
+                    player.isDucking = false;
+                    player.height = player.normalHeight;
+                }
+            }
+        }
+
+        // ------------------ منطق اللعبة ------------------
+        function startGame() {
+            gameState = 'PLAYING';
+            score = 0;
+            frameCount = 0;
+            obstacles = [];
+            player.y = groundY - player.normalHeight;
+            player.vy = 0;
+            player.isJumping = false;
+            player.isDucking = false;
+            gameLoop();
+        }
+
+        function gameOver() {
+            gameState = 'GAMEOVER';
+            fingerPointer.style.display = 'none';
+            uiOverlay.classList.remove('hidden');
+            loader.classList.add('hidden');
+            uiTitle.innerText = "خسرت!";
+            uiDesc.innerText = `النتيجة التي حققتها: ${score}`;
+            startBtn.innerText = "العب مرة أخرى";
+            startBtn.classList.remove('hidden');
+            retryBtn.classList.add('hidden');
+        }
+
+        function spawnObstacle() {
+            const type = Math.random() < 0.5 ? 0 : 1;
+            const speed = 6 + (score * 0.15);
+
+            if (type === 0) {
+                obstacles.push({
+                    x: canvas.width, y: groundY - 40, width: 40, height: 40, color: '#FF4136', speed: speed, type: type
+                });
+            } else {
+                obstacles.push({
+                    x: canvas.width, y: groundY - 110, width: 40, height: 40, color: '#0074D9', speed: speed, type: type
+                });
+            }
+        }
+
+        function update() {
+            if (gameState !== 'PLAYING') return;
+            frameCount++;
+
+            player.y += player.vy;
+            if (player.y + player.height < groundY) {
+                player.vy += player.gravity;
+            } else {
+                player.y = groundY - player.height;
+                player.vy = 0;
+                player.isJumping = false;
+            }
+
+            if (frameCount % 80 === 0) {
+                spawnObstacle();
+            }
+
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                let obs = obstacles[i];
+                obs.x -= obs.speed;
+
+                if (
+                    player.x < obs.x + obs.width &&
+                    player.x + player.width > obs.x &&
+                    player.y < obs.y + obs.height &&
+                    player.y + player.height > obs.y
+                ) {
+                    gameOver();
+                }
+
+                if (obs.x + obs.width < player.x && !obs.passed) {
+                    score++;
+                    obs.passed = true;
+                }
+
+                if (obs.x + obs.width < 0) {
+                    obstacles.splice(i, 1);
+                }
+            }
+        }
+
+        function drawBackground() {
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#2ECC40';
+            ctx.fillRect(0, groundY, canvas.width, groundHeight);
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(0, groundY + 20, canvas.width, groundHeight - 20);
+            
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(0, canvas.height * 0.35); ctx.lineTo(canvas.width, canvas.height * 0.35); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, canvas.height * 0.65); ctx.lineTo(canvas.width, canvas.height * 0.65); ctx.stroke();
+            
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.font = 'bold 18px Tahoma';
+            ctx.textAlign = 'right';
+            ctx.fillText('منطقة القفز ⬆️', canvas.width - 20, canvas.height * 0.35 - 10);
+            ctx.fillText('منطقة الجلوس ⬇️', canvas.width - 20, canvas.height * 0.65 + 25);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawBackground();
+
+            if (gameState === 'PLAYING' || gameState === 'GAMEOVER') {
+                for (let obs of obstacles) {
+                    ctx.fillStyle = obs.color;
+                    ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(obs.x, obs.y, obs.width, obs.height);
+                }
+
+                ctx.fillStyle = player.color;
+                ctx.fillRect(player.x, player.y, player.width, player.height);
+                
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                ctx.arc(player.x + player.width - 15, player.y + 15, 5, 0, Math.PI*2);
+                ctx.fill();
+
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 40px Arial';
+                ctx.textAlign = 'left';
+                ctx.shadowColor = "black";
+                ctx.shadowBlur = 4;
+                ctx.shadowOffsetX = 2;
+                ctx.shadowOffsetY = 2;
+                ctx.fillText(`النتيجة: ${score}`, 30, 50);
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+            }
+        }
+
+        function gameLoop() {
+            if (gameState === 'PLAYING') {
+                update();
+                draw();
+                requestAnimationFrame(gameLoop);
+            } else if (gameState === 'GAMEOVER') {
+                draw();
+            }
+        }
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>
