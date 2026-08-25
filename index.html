@@ -8,94 +8,169 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg-dark: #0f0f0f;
-      --bg-card: rgba(255, 255, 255, 0.08);
-      --text-primary: #e0e0e0;
-      --accent: hsl(210, 70%, 60%);
+      --bg-primary: #1b3156;
+      --bg-secondary: #1ca08c;
+      --bg-deep: #0d2038;
+      --card-bg: #1b3156;
+      --card-edge: rgba(255,255,255,0.18);
+      --text-primary: #f5fbff;
+      --text-soft: #d9f4ef;
+      --shadow: rgba(4, 15, 26, 0.45);
+      --glow: rgba(26, 218, 179, 0.55);
     }
-    body {
-      margin: 0;
-      font-family: 'Inter', sans-serif;
-      background: var(--bg-dark);
-      color: var(--text-primary);
-      display: flex;
-      flex-direction: column;
-      min-height: 100vh;
-    }
-    header {
-      text-align: center;
-      padding: 2rem 0 1rem;
-    }
-    .brand-wrap {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 1rem;
-      flex-wrap: wrap;
-      margin-bottom: 0.75rem;
-    }
-    .brand-logo {
-      width: 120px;
-      height: auto;
-      display: block;
-      filter: drop-shadow(0 0 12px rgba(255,255,255,0.15));
-    }
-    h1 {
-      margin: 0;
-      font-size: 2.5rem;
-      font-weight: 600;
-    }
-    .subtitle {
-      margin: 0.5rem 0 0;
-      font-size: 1.15rem;
-      color: #d7e6ff;
-      letter-spacing: 0.02em;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 1.5rem;
-      padding: 2rem;
-      max-width: 1200px;
-      margin: 0 auto;
-      width: 100%;
+
+    * {
       box-sizing: border-box;
     }
-    .card {
-      background: var(--bg-card);
-      border-radius: 1rem;
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: 'Inter', sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.08), transparent 25%),
+        radial-gradient(circle at bottom right, rgba(28,160,140,0.4), transparent 30%),
+        linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+      color: var(--text-primary);
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background: linear-gradient(120deg, rgba(255,255,255,0.06), transparent 35%, rgba(255,255,255,0.04));
+      pointer-events: none;
+    }
+
+    header {
       text-align: center;
-      padding: 1.5rem 1rem;
-      backdrop-filter: blur(8px);
-      transition: transform 0.2s, background 0.3s;
+      padding: 2.2rem 1rem 1rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .brand-wrap {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .brand-logo {
+      width: 150px;
+      height: auto;
+      display: block;
+      filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.22));
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2.1rem, 2.5vw, 3.6rem);
+      font-weight: 900;
+      letter-spacing: 0.02em;
+      color: #ffffff;
+      text-shadow: 0 10px 25px rgba(0,0,0,0.18);
+    }
+
+    .subtitle {
+      margin: 0.9rem 0 0;
+      font-size: 1.15rem;
+      color: var(--text-soft);
+      letter-spacing: 0.04em;
+      font-weight: 600;
+    }
+
+    .grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+      gap: 1.4rem;
+      width: min(1220px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 1.5rem 0 1rem;
+    }
+
+    .card {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 164px;
+      padding: 1.4rem 1rem;
+      border-radius: 1.5rem;
       text-decoration: none;
       color: inherit;
+      background: linear-gradient(180deg, rgba(27,49,86,0.9), rgba(17,33,59,0.9));
+      border: 1px solid var(--card-edge);
+      box-shadow: 0 12px 28px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.08);
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, filter 0.18s ease;
+      overflow: hidden;
+      isolation: isolate;
     }
-    .card:hover {
-      transform: translateY(-4px);
-      background: rgba(255, 255, 255, 0.12);
+
+    .card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.08), transparent 42%, rgba(28,160,140,0.18));
+      z-index: -1;
     }
+
+    .card:hover,
+    .card:focus-visible {
+      transform: translateY(-6px) scale(1.015);
+      box-shadow: 0 18px 38px rgba(0,0,0,0.28), 0 0 0 2px rgba(255,255,255,0.08), 0 0 18px var(--glow);
+      border-color: rgba(255,255,255,0.28);
+      filter: brightness(1.04);
+    }
+
     .icon {
-      font-size: 3rem;
-      margin-bottom: 0.5rem;
+      font-size: 3.1rem;
+      line-height: 1;
+      margin-bottom: 0.85rem;
+      filter: drop-shadow(0 5px 12px rgba(0,0,0,0.18));
     }
+
     .title {
       font-size: 1rem;
-      font-weight: 600;
+      font-weight: 800;
+      line-height: 1.5;
+      color: var(--text-primary);
+      text-align: center;
     }
+
     .footer-link {
+      position: relative;
+      z-index: 1;
       margin-top: auto;
       text-align: center;
-      padding: 1rem 1rem 2rem;
+      padding: 1.2rem 1rem 2rem;
+      user-select: none;
+      pointer-events: none;
     }
-    .footer-link a {
-      color: #d9ecff;
+
+    .footer-link span {
+      color: #edfef9;
       text-decoration: none;
-      font-weight: 600;
+      font-weight: 700;
+      opacity: 0.95;
       transition: opacity 0.2s ease;
+      cursor: default;
     }
-    .footer-link a:hover {
-      opacity: 0.8;
+
+    @media (max-width: 700px) {
+      .grid {
+        grid-template-columns: repeat(2, minmax(140px, 1fr));
+      }
     }
   </style>
 </head>
@@ -155,7 +230,7 @@
   </section>
 
   <div class="footer-link">
-    <a href="https://www.fath-app.com/" target="_blank" rel="noopener noreferrer">https://www.fath-app.com/</a>
+    <span>fath-app.com</span>
   </div>
 
   <script src="remote-nav.js"></script>
