@@ -5,6 +5,41 @@
   const focusClass = 'remote-focus';
   const focusablesSelector = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
   let focusIndex = 0;
+  let audioContext = null;
+
+  function getAudioContext() {
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtor) return null;
+    if (!audioContext) {
+      audioContext = new AudioCtor();
+    }
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+    return audioContext;
+  }
+
+  function playRemoteSound(kind = 'move') {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+
+    osc.type = kind === 'select' ? 'triangle' : 'sine';
+    osc.frequency.setValueAtTime(kind === 'select' ? 620 : 400, now);
+    osc.frequency.exponentialRampToValueAtTime(kind === 'select' ? 320 : 240, now + 0.08);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.09, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.13);
+  }
 
   function ensureStyles() {
     if (document.getElementById('remote-nav-styles')) return;
@@ -80,6 +115,7 @@
     const items = getFocusableElements();
     if (!items.length) return;
     focusIndex = (focusIndex + delta + items.length) % items.length;
+    playRemoteSound('move');
     updateSelection();
   }
 
@@ -103,6 +139,8 @@
     const items = getFocusableElements();
     const current = items[focusIndex];
     if (!current) return;
+
+    playRemoteSound('select');
 
     if (current.id === 'remote-back-btn') {
       current.click();
@@ -168,6 +206,7 @@
     const index = items.indexOf(target);
     if (index >= 0) {
       focusIndex = index;
+      playRemoteSound('select');
       updateSelection();
     }
   }
