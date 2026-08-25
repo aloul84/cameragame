@@ -24,12 +24,32 @@
     }
     header {
       text-align: center;
-      padding: 2rem 0;
+      padding: 2rem 0 1rem;
+    }
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.75rem;
+    }
+    .brand-logo {
+      width: 120px;
+      height: auto;
+      display: block;
+      filter: drop-shadow(0 0 12px rgba(255,255,255,0.15));
     }
     h1 {
       margin: 0;
       font-size: 2.5rem;
       font-weight: 600;
+    }
+    .subtitle {
+      margin: 0.5rem 0 0;
+      font-size: 1.15rem;
+      color: #d7e6ff;
+      letter-spacing: 0.02em;
     }
     .grid {
       display: grid;
@@ -38,6 +58,8 @@
       padding: 2rem;
       max-width: 1200px;
       margin: 0 auto;
+      width: 100%;
+      box-sizing: border-box;
     }
     .card {
       background: var(--bg-card);
@@ -61,11 +83,29 @@
       font-size: 1rem;
       font-weight: 600;
     }
+    .footer-link {
+      margin-top: auto;
+      text-align: center;
+      padding: 1rem 1rem 2rem;
+    }
+    .footer-link a {
+      color: #d9ecff;
+      text-decoration: none;
+      font-weight: 600;
+      transition: opacity 0.2s ease;
+    }
+    .footer-link a:hover {
+      opacity: 0.8;
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>اختر لعبة</h1>
+    <div class="brand-wrap">
+      <img class="brand-logo" src="fath-logo-white.png" alt="Fath logo" />
+    </div>
+    <h1>Fath play - ألعاب فذ</h1>
+    <p class="subtitle">اختر لعبة</p>
   </header>
   <section class="grid">
     <a class="card" href="arabic-letters.html">
@@ -113,6 +153,11 @@
       <div class="title">Twins Simulator</div>
     </a>
   </section>
+
+  <div class="footer-link">
+    <a href="https://www.fath-app.com/" target="_blank" rel="noopener noreferrer">https://www.fath-app.com/</a>
+  </div>
+
   <script src="remote-nav.js"></script>
 </body>
 </html>
