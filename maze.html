@@ -2,100 +2,119 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>لعبة المتاهة التفاعلية بكف اليد</title>
-    <!-- استدعاء مكتبات MediaPipe بالطريقة المستقرة -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-    
+    <script src="game-common.js"></script>
+
     <style>
-        body {
+        * { box-sizing: border-box; }
+        html, body {
             margin: 0;
             padding: 0;
+            width: 100%;
+            height: 100%;
             overflow: hidden;
             background-color: #0b0c10;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
-        #gameCanvas {
-            display: block;
-            width: 100vw;
-            height: 100vh;
+        #gameCanvas { position: fixed; top: 0; left: 0; display: block; }
+
+        /* شريط المعلومات العلوي (المستوى - الكاميرا - الوقت والقلوب) */
+        #hud {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: calc(6px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 6px calc(12px + env(safe-area-inset-left));
+            color: #c5c6c7;
+            font-weight: bold;
+            font-size: clamp(13px, 3.4vw, 20px);
+            z-index: 10;
+            pointer-events: none;
         }
+        #hud > div { flex: 1; }
+        #hudLevel { color: #66fcf1; text-align: right; }
+        #hudStats { text-align: left; line-height: 1.5; }
+        #hudTime.low { color: #ff5252; }
 
         #cameraContainer {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            width: 160px;
-            height: 120px;
-            border: 3px solid #66fcf1;
-            border-radius: 10px;
+            flex: 0 0 auto !important;
+            width: 84px;
+            height: 63px;
+            border: 2px solid #66fcf1;
+            border-radius: 8px;
             overflow: hidden;
-            box-shadow: 0 0 15px rgba(102, 252, 241, 0.5);
+            box-shadow: 0 0 12px rgba(102, 252, 241, 0.5);
             background: #000;
-            z-index: 10;
         }
-
-        #videoElement {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1);
-            opacity: 0.6;
-        }
+        #videoElement { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0.7; }
 
         .overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
+            position: fixed;
+            inset: 0;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            background: rgba(11, 12, 16, 0.95);
+            background: rgba(11, 12, 16, 0.96);
             color: white;
             z-index: 20;
             text-align: center;
-            padding: 20px;
-            box-sizing: border-box;
+            padding: 16px;
+            overflow-y: auto;
         }
+        .overlay > * { flex-shrink: 0; }
 
         h1 {
-            font-size: 2.8rem;
-            margin-bottom: 10px;
+            font-size: clamp(1.6rem, 6vw, 2.8rem);
+            margin: 0 0 8px;
             color: #66fcf1;
             text-shadow: 0 0 10px rgba(102, 252, 241, 0.7);
         }
-
         p {
-            font-size: 1.2rem;
-            margin-bottom: 25px;
+            font-size: clamp(0.95rem, 3.4vw, 1.2rem);
+            margin: 0 0 16px;
             color: #c5c6c7;
-            max-width: 80%;
+            max-width: 560px;
             line-height: 1.6;
         }
 
         button {
-            padding: 15px 45px;
-            font-size: 1.5rem;
+            font-family: inherit;
+            padding: 12px 40px;
+            font-size: clamp(1.1rem, 4.5vw, 1.5rem);
             background-color: #45a29e;
             color: #fff;
             border: 2px solid #66fcf1;
             border-radius: 50px;
             cursor: pointer;
             box-shadow: 0 0 15px rgba(102, 252, 241, 0.4);
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
         }
+        button:hover, button:active { background-color: #66fcf1; color: #0b0c10; box-shadow: 0 0 25px rgba(102, 252, 241, 0.8); }
 
-        button:hover {
-            background-color: #66fcf1;
-            color: #0b0c10;
-            box-shadow: 0 0 25px rgba(102, 252, 241, 0.8);
+        #levelPicker { display: flex; gap: 10px; margin: 0 0 18px; flex-wrap: wrap; justify-content: center; }
+        .lvl {
+            padding: 8px 14px;
+            min-width: 76px;
+            font-size: 1.3rem;
+            background: #1f2833;
+            border-radius: 14px;
+            line-height: 1.3;
+            box-shadow: none;
         }
+        .lvl small { display: block; font-size: 0.7rem; opacity: 0.85; }
+        .lvl.sel { background: #66fcf1; color: #0b0c10; box-shadow: 0 0 18px rgba(102, 252, 241, 0.8); }
+        .lvl:disabled { opacity: 0.4; cursor: not-allowed; }
 
         .hidden { display: none !important; }
 
@@ -103,47 +122,40 @@
             border: 5px solid rgba(255,255,255,0.1);
             border-top: 5px solid #66fcf1;
             border-radius: 50%;
-            width: 60px;
-            height: 60px;
+            width: 52px;
+            height: 52px;
             animation: spin 1s linear infinite;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
         }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        #handCursor {
-            position: absolute;
-            width: 30px;
-            height: 30px;
-            background: #66fcf1;
-            border: 3px solid #fff;
-            border-radius: 50%;
-            box-shadow: 0 0 15px #66fcf1;
-            pointer-events: none;
-            z-index: 15;
-            transform: translate(-50%, -50%);
-            display: none;
+        @media (max-height: 460px) {
+            h1 { margin-bottom: 4px; }
+            p { margin-bottom: 8px; }
+            #levelPicker { margin-bottom: 10px; }
+            .lvl { padding: 4px 10px; font-size: 1.1rem; }
+            button { padding: 8px 28px; }
+            #cameraContainer { width: 64px; height: 48px; }
         }
     </style>
 </head>
 <body>
 
+    <div id="hud">
+        <div id="hudLevel"></div>
+        <div id="cameraContainer"><video id="videoElement" autoplay playsinline muted></video></div>
+        <div id="hudStats"><span id="hudTime"></span><br><span id="hudLives"></span></div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
     <div id="uiOverlay" class="overlay">
         <div id="loader" class="loader"></div>
         <h1 id="uiTitle">جاري تحضير لعبة المتاهة...</h1>
         <p id="uiDesc">ننتظر موافقتك لتشغيل الكاميرا وتحليل كف اليد.</p>
+        <div id="levelPicker"></div>
         <button id="startBtn" class="hidden">ابدأ التحدي</button>
     </div>
-
-    <div id="handCursor"></div>
-    <div id="cameraContainer">
-        <video id="videoElement" autoplay playsinline></video>
-    </div>
-    
-    <canvas id="gameCanvas"></canvas>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
@@ -154,395 +166,486 @@
         const uiDesc = document.getElementById('uiDesc');
         const loader = document.getElementById('loader');
         const startBtn = document.getElementById('startBtn');
-        const handCursor = document.getElementById('handCursor');
+        const levelPicker = document.getElementById('levelPicker');
+        const hudLevel = document.getElementById('hudLevel');
+        const hudTime = document.getElementById('hudTime');
+        const hudLives = document.getElementById('hudLives');
+        const input = GC.input;
 
-        let width, height;
-        function resize() {
-            width = canvas.width = window.innerWidth;
-            height = canvas.height = window.innerHeight;
-            initMaze();
-        }
-        window.addEventListener('resize', resize);
-
-        let gameState = 'INIT'; // INIT, WAITING_START, PLAYING, COLLISION_PAUSE, GAMEOVER, WIN
-        let hands = null;
-        let currentHandPos = { x: 0, y: 0 };
-        let hasHand = false;
-
-        let mazeCols = 10;
-        let mazeRows = 8;
-        let cellSize = 60;
-        let mazeOffsetX = 0;
-        let mazeOffsetY = 0;
-
-        let lives = 3; // عدد المحاولات (القلوب)
-        let collisionTimer = 0; // مؤقت مهلة الاصطدام (2 ثانية)
-
-        let player = {
-            x: 0,
-            y: 0,
-            radius: 12
-        };
-
-        let startPoint = { col: 0, row: 0 };
-        let endPoint = { col: 0, row: 0 };
-
-        let rawMazeTemplate = [
-            [0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-            [0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-            [1, 1, 1, 0, 1, 1, 0, 1, 0, 1],
-            [1, 0, 0, 0, 0, 0, 0, 1, 0, 1],
-            [1, 0, 1, 1, 1, 1, 1, 1, 0, 1],
-            [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+        /* ---------------- المستويات ----------------
+           cells: عدد خلايا الممرات [أفقي, عمودي] (تنعكس تلقائياً في الجوال الطولي)
+           braid: احتمال فتح جدران إضافية (مسارات متعددة = أسهل)
+           time: الوقت المسموح بالثواني
+           dark: وضع الظلام (يظهر جزء صغير حول الكرة فقط) */
+        const LEVELS = [
+            { name: 'مبتدئ',  cells: [5, 3],  seed: 11, braid: 0.45, time: 90,  wall: '#1f2833', line: '#45a29e', accent: '#66fcf1' },
+            { name: 'متوسط',  cells: [7, 4],  seed: 23, braid: 0.22, time: 100, wall: '#1d2b3a', line: '#4f9ad6', accent: '#7cc4ff' },
+            { name: 'صعب',    cells: [9, 5],  seed: 37, braid: 0.08, time: 120, wall: '#2e2433', line: '#b36bd6', accent: '#e0a3ff' },
+            { name: 'ظلام',   cells: [11, 6], seed: 41, braid: 0,    time: 150, wall: '#2b2418', line: '#e0a030', accent: '#ffd36b', dark: true }
         ];
+        const MAX_LIVES = 3;
+        const HOLD_HAND = 2000;
+        const HOLD_POINTER = 700;
+        const BLOCK_MS = 2000;
+        const BALL_HIT_R = 0.2;   // نصف قطر الاصطدام (بوحدة الخلية)
+        const BALL_DRAW_R = 0.3;
 
-        // متغيرات العد التنازلي لحماية البداية (3 ثوانٍ)
-        let startHoldStartTime = null;
-        const requiredHoldTime = 3000; // 3 ثوانٍ بالميلي ثانية
+        let unlocked = Math.max(1, Math.min(LEVELS.length, GC.store.get('maze_unlocked') || 1));
+        let selected = 0;      // المستوى المختار في القائمة
+        let level = 0;         // المستوى الجاري
+        let state = 'INIT';    // INIT, WAITING_START, PLAYING, BLOCKED, OVER
+        let overlayMode = 'start';
+        let lives = MAX_LIVES;
+        let elapsed = 0;
+        let holdStart = null;
+        let blockStart = 0;
+        let lastT = performance.now();
+        let hands = null;
+        let cameraOK = false;
 
-        function initMaze() {
-            mazeRows = rawMazeTemplate.length;
-            mazeCols = rawMazeTemplate[0].length;
-            
-            const maxW = width * 0.8;
-            const maxH = height * 0.75;
-            cellSize = Math.min(maxW / mazeCols, maxH / mazeRows);
+        let grid = [], gw = 0, gh = 0, cell = 0, offX = 0, offY = 0;
+        let startCell = { x: 1, y: 1 }, endCell = { x: 1, y: 1 };
+        let wasPortrait = null;
+        let staticLayer = null;
+        const ball = { x: 1.5, y: 1.5 };
 
-            mazeOffsetX = (width - (mazeCols * cellSize)) / 2;
-            mazeOffsetY = (height - (mazeRows * cellSize)) / 2;
-
-            startPoint = { col: 0, row: 0 };
-            endPoint = { col: mazeCols - 1, row: mazeRows - 1 };
-
-            resetPlayerToStart();
+        /* ---------------- توليد المتاهة (ثابت لكل مستوى) ---------------- */
+        function mulberry32(a) {
+            return function () {
+                a |= 0; a = a + 0x6D2B79F5 | 0;
+                let t = Math.imul(a ^ a >>> 15, 1 | a);
+                t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            };
         }
 
-        function resetPlayerToStart() {
-            player.x = mazeOffsetX + (startPoint.col + 0.5) * cellSize;
-            player.y = mazeOffsetY + (startPoint.row + 0.5) * cellSize;
+        function generateMaze(cx, cy, seed, braid) {
+            const W = 2 * cx + 1, H = 2 * cy + 1;
+            const g = Array.from({ length: H }, () => Array(W).fill(1));
+            const rnd = mulberry32(seed);
+            const seen = Array.from({ length: cy }, () => Array(cx).fill(false));
+            const stack = [[0, 0]];
+            seen[0][0] = true;
+            g[1][1] = 0;
+            while (stack.length) {
+                const [i, j] = stack[stack.length - 1];
+                const nb = [];
+                [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([di, dj]) => {
+                    const ni = i + di, nj = j + dj;
+                    if (ni >= 0 && nj >= 0 && ni < cx && nj < cy && !seen[nj][ni]) nb.push([ni, nj, di, dj]);
+                });
+                if (!nb.length) { stack.pop(); continue; }
+                const [ni, nj, di, dj] = nb[Math.floor(rnd() * nb.length)];
+                seen[nj][ni] = true;
+                g[2 * j + 1 + dj][2 * i + 1 + di] = 0;
+                g[2 * nj + 1][2 * ni + 1] = 0;
+                stack.push([ni, nj]);
+            }
+            // فتح بعض الجدران الداخلية لإنشاء مسارات بديلة
+            for (let y = 1; y < H - 1; y++) {
+                for (let x = 1; x < W - 1; x++) {
+                    const between = (x % 2 === 1 && y % 2 === 0) || (x % 2 === 0 && y % 2 === 1);
+                    if (g[y][x] === 1 && between && rnd() < braid) g[y][x] = 0;
+                }
+            }
+            return g;
         }
 
-        async function initAI() {
-            try {
-                hands = new Hands({
-                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-                });
+        function buildLevel() {
+            const L = LEVELS[level];
+            const portrait = GC.view.h > GC.view.w;
+            wasPortrait = portrait;
+            let [cx, cy] = L.cells;
+            if (portrait) [cx, cy] = [cy, cx];
+            grid = generateMaze(cx, cy, L.seed, L.braid);
+            gh = grid.length;
+            gw = grid[0].length;
+            startCell = { x: 1, y: 1 };
+            endCell = { x: gw - 2, y: gh - 2 };
+            layout();
+            resetBall();
+        }
 
-                hands.setOptions({
-                    maxNumHands: 1,
-                    modelComplexity: 1,
-                    minDetectionConfidence: 0.6,
-                    minTrackingConfidence: 0.6
-                });
+        function layout() {
+            if (!gw) return;
+            const { w, h, dpr } = GC.view;
+            const hudH = document.getElementById('hud').offsetHeight + 4;
+            const availW = w - 20;
+            const availH = h - hudH - 14 - 6;
+            cell = Math.max(8, Math.floor(Math.min(availW / gw, availH / gh)));
+            offX = Math.round((w - cell * gw) / 2);
+            offY = Math.round(hudH + (availH - cell * gh) / 2 + 4);
+            renderStatic(dpr);
+        }
 
-                hands.onResults((results) => {
-                    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                        hasHand = true;
-                        const palm = results.multiHandLandmarks[0][9];
-                        
-                        const targetX = (1 - palm.x) * width;
-                        const targetY = palm.y * height;
-                        
-                        if (gameState === 'INIT' || gameState === 'GAMEOVER' || gameState === 'WIN' || gameState === 'WAITING_START') {
-                            currentHandPos.x = targetX;
-                            currentHandPos.y = targetY;
-                        } else {
-                            currentHandPos.x += (targetX - currentHandPos.x) * 0.3;
-                            currentHandPos.y += (targetY - currentHandPos.y) * 0.3;
-                        }
-
-                        handCursor.style.display = 'block';
-                        handCursor.style.left = `${currentHandPos.x}px`;
-                        handCursor.style.top = `${currentHandPos.y}px`;
+        function renderStatic(dpr) {
+            const L = LEVELS[level];
+            staticLayer = document.createElement('canvas');
+            staticLayer.width = Math.ceil(gw * cell * dpr);
+            staticLayer.height = Math.ceil(gh * cell * dpr);
+            const c = staticLayer.getContext('2d');
+            c.scale(dpr, dpr);
+            c.fillStyle = '#0b0c10';
+            c.fillRect(0, 0, gw * cell, gh * cell);
+            for (let r = 0; r < gh; r++) {
+                for (let q = 0; q < gw; q++) {
+                    const x = q * cell, y = r * cell;
+                    if (grid[r][q] === 1) {
+                        c.fillStyle = L.wall;
+                        c.fillRect(x, y, cell, cell);
+                        c.strokeStyle = L.line;
+                        c.lineWidth = 1.5;
+                        c.strokeRect(x + 0.75, y + 0.75, cell - 1.5, cell - 1.5);
                     } else {
-                        hasHand = false;
-                        handCursor.style.display = 'none';
+                        c.strokeStyle = 'rgba(255,255,255,0.05)';
+                        c.lineWidth = 1;
+                        c.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
                     }
-                });
-
-                const camera = new Camera(videoElement, {
-                    onFrame: async () => {
-                        if (hands) {
-                            await hands.send({ image: videoElement });
-                        }
-                    },
-                    width: 640,
-                    height: 480
-                });
-
-                await camera.start();
-                uiTitle.innerText = "الكاميرا جاهزة!";
-                uiDesc.innerHTML = "ضع يدك داخل مربع (البداية) لمدة 3 ثوانٍ متواصلة لبدء اللعبة!<br>لديك 3 محاولات (قلوب).";
-                loader.classList.add('hidden');
-                startBtn.classList.remove('hidden');
-
-            } catch (err) {
-                uiTitle.innerText = "تعذر تشغيل الكاميرا";
-                uiTitle.style.color = "#ff5252";
-                uiDesc.innerHTML = "يرجى السماح للمتصفح بالوصول إلى الكاميرا والتأكد من فتح الرابط عبر متصفح كروم.";
-                loader.classList.add('hidden');
-                console.error(err);
+                }
             }
         }
 
-        startBtn.addEventListener('click', () => {
-            uiOverlay.classList.add('hidden');
-            lives = 3;
-            initMaze();
-            startHoldStartTime = null;
-            gameState = 'WAITING_START'; // الدخول في وضع انتظار التثبيت بالبداية
-            
-            // بدء حلقة الرسم فوراً لكي تظهر المتاهة والخلفية فور النقر
-            requestAnimationFrame(gameLoop);
-        });
-
-        // تشغيل التحجيم والمتاهة أولاً لتظهر اللعبة فور فتح الصفحة
-        resize();
-
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            initAI();
-        } else {
-            uiTitle.innerText = "المتصفح غير مدعوم";
-            loader.classList.add('hidden');
+        function resetBall() {
+            ball.x = startCell.x + 0.5;
+            ball.y = startCell.y + 0.5;
         }
 
-        function updateGame() {
-            if (!hasHand) return;
+        // تغيير حجم الشاشة أو اتجاه الجوال
+        GC.fitCanvas(canvas, () => {
+            if (!grid.length) return;
+            const portrait = GC.view.h > GC.view.w;
+            if (portrait !== wasPortrait) {
+                buildLevel();
+                if (state === 'PLAYING' || state === 'BLOCKED') { state = 'WAITING_START'; holdStart = null; }
+            } else {
+                layout();
+            }
+        });
 
-            if (gameState === 'WAITING_START') {
-                // التحقق مما إذا كانت اليد داخل خلية البداية
-                const startCellX = mazeOffsetX + startPoint.col * cellSize;
-                const startCellY = mazeOffsetY + startPoint.row * cellSize;
-                
-                const isInsideStart = (
-                    currentHandPos.x >= startCellX &&
-                    currentHandPos.x <= startCellX + cellSize &&
-                    currentHandPos.y >= startCellY &&
-                    currentHandPos.y <= startCellY + cellSize
-                );
-
-                if (isInsideStart) {
-                    if (startHoldStartTime === null) {
-                        startHoldStartTime = Date.now(); // بدء حساب وقت التثبيت
-                    } else {
-                        const elapsed = Date.now() - startHoldStartTime;
-                        if (elapsed >= requiredHoldTime) {
-                            // اكتملت الـ 3 ثوانٍ بنجاح، ابدأ اللعب الفعلي!
-                            gameState = 'PLAYING';
-                            player.x = currentHandPos.x;
-                            player.y = currentHandPos.y;
-                        }
+        /* ---------------- منطق الاصطدام (بوحدة الخلية) ---------------- */
+        function hitsWall(x, y) {
+            const r = BALL_HIT_R;
+            for (let cy = Math.floor(y - r); cy <= Math.floor(y + r); cy++) {
+                for (let cx = Math.floor(x - r); cx <= Math.floor(x + r); cx++) {
+                    if (cy < 0 || cx < 0 || cy >= gh || cx >= gw || grid[cy][cx] === 1) {
+                        const nx = Math.max(cx, Math.min(x, cx + 1));
+                        const ny = Math.max(cy, Math.min(y, cy + 1));
+                        if ((x - nx) * (x - nx) + (y - ny) * (y - ny) < r * r) return true;
                     }
-                } else {
-                    // إذا خرج من منطقة البداية قبل انتهاء الـ 3 ثوانٍ، يعيد العداد من جديد
-                    startHoldStartTime = null;
+                }
+            }
+            return false;
+        }
+
+        function segmentClear(ax, ay, bx, by) {
+            const len = Math.hypot(bx - ax, by - ay);
+            const n = Math.max(1, Math.ceil(len / 0.07));
+            for (let i = 1; i <= n; i++) {
+                if (hitsWall(ax + (bx - ax) * i / n, ay + (by - ay) * i / n)) return false;
+            }
+            return true;
+        }
+
+        function targetGrid() {
+            return { x: (input.x - offX) / cell, y: (input.y - offY) / cell };
+        }
+
+        /* ---------------- التحديث ---------------- */
+        function update(now) {
+            const dt = Math.min(now - lastT, 50);
+            lastT = now;
+            const L = LEVELS[level];
+
+            if (state === 'WAITING_START') {
+                if (!input.active) { holdStart = null; return; }
+                const t = targetGrid();
+                const inside = t.x >= startCell.x - 0.15 && t.x <= startCell.x + 1.15 &&
+                               t.y >= startCell.y - 0.15 && t.y <= startCell.y + 1.15;
+                if (!inside) { holdStart = null; return; }
+                if (holdStart === null) holdStart = now;
+                const need = input.mode === 'hand' ? HOLD_HAND : HOLD_POINTER;
+                if (now - holdStart >= need) {
+                    state = 'PLAYING';
+                    resetBall();
+                    GC.beep(520, 0.12, 'triangle', 0.15);
+                    GC.beep(780, 0.18, 'triangle', 0.15, 0.1);
                 }
                 return;
             }
 
-            if (gameState === 'PLAYING') {
-                // تحريك الكرة بسلاسة نحو موقع اليد
-                const dx = currentHandPos.x - player.x;
-                const dy = currentHandPos.y - player.y;
-                
-                player.x += dx * 0.15;
-                player.y += dy * 0.15;
+            if (state !== 'PLAYING' && state !== 'BLOCKED') return;
 
-                const col = Math.floor((player.x - mazeOffsetX) / cellSize);
-                const row = Math.floor((player.y - mazeOffsetY) / cellSize);
+            elapsed += dt;
+            if (elapsed >= L.time * 1000) { finish('time'); return; }
 
-                // التحقق من الاصطدام بالجدران أو الخروج عن الحدود
-                if (col < 0 || col >= mazeCols || row < 0 || row >= mazeRows || rawMazeTemplate[row][col] === 1) {
-                    handleHitWall();
-                    return;
+            if (state === 'PLAYING') {
+                if (!input.active) return;
+                const t = targetGrid();
+                const f = 1 - Math.pow(1 - 0.2, dt / 16.67);
+                const dx = (t.x - ball.x) * f, dy = (t.y - ball.y) * f;
+                const n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 0.07));
+                for (let i = 0; i < n; i++) {
+                    const nx = ball.x + dx / n, ny = ball.y + dy / n;
+                    if (hitsWall(nx, ny)) {
+                        state = 'BLOCKED';
+                        blockStart = now;
+                        GC.beep(160, 0.25, 'sawtooth', 0.18, 0, 70);
+                        GC.vibrate(120);
+                        return;
+                    }
+                    ball.x = nx; ball.y = ny;
                 }
-
-                // الفوز بالمتاهة
-                if (col === endPoint.col && row === endPoint.row) {
-                    gameState = 'WIN';
-                }
-            } 
-            else if (gameState === 'COLLISION_PAUSE') {
-                // مهلة الـ 2 ثانية أثناء الاصطدام
-                const remainingTime = 2000 - (Date.now() - collisionTimer);
-                
-                // تتبع حركة اليد أثناء المهلة لمعرفة إن كان سيخرج من منطقة الاصطدام
-                const col = Math.floor((currentHandPos.x - mazeOffsetX) / cellSize);
-                const row = Math.floor((currentHandPos.y - mazeOffsetY) / cellSize);
-                const isSafe = (col >= 0 && col < mazeCols && row >= 0 && row < mazeRows && rawMazeTemplate[row][col] === 0);
-
-                if (isSafe) {
-                    // إذا أخرج يده وعاد لمنطقة آمنة خلال السنتين، استأنف اللعب فوراً بدون خسارة قلب!
-                    player.x = currentHandPos.x;
-                    player.y = currentHandPos.y;
-                    gameState = 'PLAYING';
-                } else if (remainingTime <= 0) {
-                    // انتهت الـ 2 ثانية ولم يخرج من الجدار -> خصم محاولة
+                if (Math.floor(ball.x) === endCell.x && Math.floor(ball.y) === endCell.y) finish('win');
+            } else { // BLOCKED: على اللاعب إعادة يده إلى الممر قبل انتهاء المهلة
+                const t = targetGrid();
+                if (input.active && !hitsWall(t.x, t.y) && segmentClear(ball.x, ball.y, t.x, t.y)) {
+                    state = 'PLAYING';
+                } else if (now - blockStart >= BLOCK_MS) {
                     lives--;
                     if (lives > 0) {
-                        resetPlayerToStart();
-                        gameState = 'WAITING_START'; // إعادة حماية البداية
-                        startHoldStartTime = null;
+                        resetBall();
+                        state = 'WAITING_START';
+                        holdStart = null;
                     } else {
-                        gameState = 'GAMEOVER';
+                        finish('lose');
                     }
                 }
             }
         }
 
-        function handleHitWall() {
-            collisionTimer = Date.now(); // بدء عداد السنتين
-            gameState = 'COLLISION_PAUSE';
+        /* ---------------- النهاية والقوائم ---------------- */
+        function finish(kind) {
+            state = 'OVER';
+            if (kind === 'win') {
+                const key = 'maze_best_' + level;
+                const best = GC.store.get(key);
+                if (!best || elapsed < best) GC.store.set(key, Math.round(elapsed));
+                if (level + 1 < LEVELS.length && unlocked < level + 2) {
+                    unlocked = level + 2;
+                    GC.store.set('maze_unlocked', unlocked);
+                }
+                const last = level === LEVELS.length - 1;
+                selected = last ? 0 : level + 1;
+                overlayMode = last ? 'done' : 'win';
+                const secs = (elapsed / 1000).toFixed(1);
+                const bestSecs = (Math.min(best || Infinity, Math.round(elapsed)) / 1000).toFixed(1);
+                uiTitle.innerText = last ? 'أنهيت كل المستويات! 🏆' : 'مبروك! أتممت المستوى 🎉';
+                uiTitle.style.color = '#00ffcc';
+                uiDesc.innerHTML = `${'⭐'.repeat(lives)}${'☆'.repeat(MAX_LIVES - lives)}<br>وقتك: ${secs} ث — أفضل وقت: ${bestSecs} ث`;
+                [523, 659, 784, 1047].forEach((f, i) => GC.beep(f, 0.22, 'triangle', 0.16, i * 0.12));
+            } else {
+                overlayMode = 'lose';
+                selected = level;
+                uiTitle.innerText = kind === 'time' ? 'انتهى الوقت! ⏱️' : 'انتهت المحاولات! ❌';
+                uiTitle.style.color = '#ff4d4d';
+                uiDesc.innerHTML = kind === 'time' ? 'لم تصل إلى النهاية في الوقت المحدد. جرّب مرة أخرى!'
+                                                   : 'اصطدمت بالجدران 3 مرات. ركّز أكثر في المرة القادمة!';
+                [330, 262, 196, 130].forEach((f, i) => GC.beep(f, 0.25, 'square', 0.12, i * 0.15));
+            }
+            showOverlay();
         }
 
-        function drawMaze() {
-            ctx.fillStyle = '#0b0c10';
-            ctx.fillRect(0, 0, width, height);
+        function showOverlay() {
+            buildPicker();
+            uiOverlay.classList.remove('hidden');
+            loader.classList.add('hidden');
+            startBtn.classList.remove('hidden');
+        }
 
-            ctx.fillStyle = '#66fcf1';
-            ctx.font = 'bold 26px Tahoma';
+        function buildPicker() {
+            levelPicker.innerHTML = '';
+            LEVELS.forEach((L, i) => {
+                const b = document.createElement('button');
+                const locked = i >= unlocked;
+                b.className = 'lvl' + (i === selected ? ' sel' : '');
+                b.disabled = locked;
+                b.innerHTML = (locked ? '🔒' : (i + 1)) + `<small>${L.name}</small>`;
+                b.addEventListener('click', () => { selected = i; buildPicker(); });
+                levelPicker.appendChild(b);
+            });
+            const lbl = { start: 'ابدأ', win: 'المستوى التالي', done: 'العب من جديد', lose: 'حاول مرة أخرى' }[overlayMode];
+            startBtn.innerText = overlayMode === 'win' || overlayMode === 'done'
+                ? lbl : `${lbl}: المستوى ${selected + 1} - ${LEVELS[selected].name}`;
+            if (overlayMode === 'win') startBtn.innerText = `${lbl}: ${selected + 1} - ${LEVELS[selected].name}`;
+        }
+
+        startBtn.addEventListener('click', () => {
+            GC.audioInit();
+            uiOverlay.classList.add('hidden');
+            level = selected;
+            lives = MAX_LIVES;
+            elapsed = 0;
+            holdStart = null;
+            buildLevel();
+            state = 'WAITING_START';
+            lastT = performance.now();
+        });
+
+        /* ---------------- الكاميرا والتتبع ---------------- */
+        function readyToStart(msg, failed) {
+            loader.classList.add('hidden');
+            uiTitle.innerText = failed ? 'الكاميرا غير متاحة' : 'الكاميرا جاهزة!';
+            uiTitle.style.color = failed ? '#ffb74d' : '';
+            uiDesc.innerHTML = msg;
+            overlayMode = 'start';
+            showOverlay();
+        }
+
+        async function initAI() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof Hands === 'undefined') {
+                readyToStart('يمكنك اللعب باللمس أو بالفأرة: اسحب الكرة داخل الممرات.', true);
+                return;
+            }
+            try {
+                hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+                hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+                hands.onResults((results) => {
+                    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                        const p = results.multiHandLandmarks[0][9];
+                        GC.setHand(p.x, p.y);
+                    } else {
+                        GC.clearHand();
+                    }
+                });
+                await GC.startCamera(videoElement, hands);
+                cameraOK = true;
+                readyToStart('ثبّت يدك (أو إصبعك) على المربع الأخضر لبدء المستوى.<br>لديك 3 محاولات (قلوب) لكل مستوى.', false);
+            } catch (err) {
+                console.error(err);
+                readyToStart('تعذر تشغيل الكاميرا — اسمح للمتصفح بالوصول إليها، أو العب باللمس أو بالفأرة.', true);
+            }
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function px(gx) { return offX + gx * cell; }
+        function py(gy) { return offY + gy * cell; }
+
+        function textBox(lines, cy, colors) {
+            const { w } = GC.view;
+            const fs = Math.max(16, Math.min(w * 0.05, 28));
+            ctx.font = `bold ${fs}px Tahoma`;
             ctx.textAlign = 'center';
-            ctx.fillText('لعبة المتاهة بكف اليد', width / 2, 45);
+            ctx.textBaseline = 'middle';
+            const widest = Math.max(...lines.map(s => ctx.measureText(s).width));
+            const bw = widest + 40, bh = lines.length * fs * 1.5 + 20;
+            ctx.fillStyle = 'rgba(11,12,16,0.82)';
+            ctx.beginPath();
+            ctx.roundRect(w / 2 - bw / 2, cy - bh / 2, bw, bh, 16);
+            ctx.fill();
+            lines.forEach((s, i) => {
+                ctx.fillStyle = colors[i] || '#fff';
+                ctx.fillText(s, w / 2, cy - bh / 2 + 10 + fs * 0.75 + i * fs * 1.5);
+            });
+        }
 
-            // رسم القلوب (المحاولات المتبقية)
-            ctx.fillStyle = '#ff4d4d';
-            ctx.font = 'bold 22px Tahoma';
-            ctx.textAlign = 'right';
-            let heartsStr = '❤️ '.repeat(lives);
-            ctx.fillText(`المحاولات: ${heartsStr}`, width - 30, 45);
+        function draw(now) {
+            GC.begin(ctx);
+            const { w, h } = GC.view;
+            const L = LEVELS[level];
+            ctx.fillStyle = '#0b0c10';
+            ctx.fillRect(0, 0, w, h);
+            if (!staticLayer) return;
 
-            for (let r = 0; r < mazeRows; r++) {
-                for (let c = 0; c < mazeCols; c++) {
-                    const x = mazeOffsetX + c * cellSize;
-                    const y = mazeOffsetY + r * cellSize;
+            ctx.drawImage(staticLayer, offX, offY, gw * cell, gh * cell);
 
-                    if (rawMazeTemplate[r][c] === 1) {
-                        ctx.fillStyle = '#1f2833';
-                        ctx.fillRect(x, y, cellSize, cellSize);
-                        ctx.strokeStyle = '#45a29e';
-                        ctx.lineWidth = 2;
-                        ctx.strokeRect(x, y, cellSize, cellSize);
-                    } else {
-                        ctx.fillStyle = '#0b0c10';
-                        ctx.fillRect(x, y, cellSize, cellSize);
-                        ctx.strokeStyle = 'rgba(102, 252, 241, 0.1)';
-                        ctx.strokeRect(x, y, cellSize, cellSize);
-                    }
-
-                    if (r === startPoint.row && c === startPoint.col) {
-                        ctx.fillStyle = 'rgba(0, 255, 204, 0.4)';
-                        ctx.fillRect(x, y, cellSize, cellSize);
-                        ctx.fillStyle = '#00ffcc';
-                        ctx.font = 'bold 16px Tahoma';
-                        ctx.fillText('البداية', x + cellSize/2, y + cellSize/2 + 6);
-                    }
-
-                    if (r === endPoint.row && c === endPoint.col) {
-                        ctx.fillStyle = 'rgba(255, 215, 0, 0.4)';
-                        ctx.fillRect(x, y, cellSize, cellSize);
-                        ctx.fillStyle = '#ffd700';
-                        ctx.font = 'bold 16px Tahoma';
-                        ctx.fillText('النهاية', x + cellSize/2, y + cellSize/2 + 6);
-                    }
-                }
+            if (state === 'WAITING_START') {
+                ctx.fillStyle = 'rgba(11,12,16,0.55)';
+                ctx.fillRect(offX, offY, gw * cell, gh * cell);
             }
 
-            // رسم اللاعب (الكرة)
+            // البداية والنهاية
+            const pulse = 0.35 + 0.15 * Math.sin(now / 250);
+            ctx.fillStyle = `rgba(0,255,204,${pulse + 0.15})`;
+            ctx.fillRect(px(startCell.x), py(startCell.y), cell, cell);
+            ctx.fillStyle = `rgba(255,215,0,${pulse})`;
+            ctx.fillRect(px(endCell.x), py(endCell.y), cell, cell);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = `${cell * 0.6}px Arial`;
+            ctx.fillStyle = '#fff';
+            ctx.fillText('🚩', px(startCell.x + 0.5), py(startCell.y + 0.55));
+            ctx.fillText('🏁', px(endCell.x + 0.5), py(endCell.y + 0.55));
+
+            // الكرة
+            const bx = px(ball.x), by = py(ball.y);
+            const bad = state === 'BLOCKED' || !input.active;
             ctx.beginPath();
-            ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
-            ctx.fillStyle = (gameState === 'COLLISION_PAUSE') ? '#ff4d4d' : (hasHand ? '#66fcf1' : '#ff4d4d');
+            ctx.arc(bx, by, cell * BALL_DRAW_R, 0, Math.PI * 2);
+            ctx.fillStyle = bad ? '#ff4d4d' : L.accent;
             ctx.shadowColor = ctx.fillStyle;
             ctx.shadowBlur = 15;
             ctx.fill();
             ctx.shadowBlur = 0;
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2.5;
             ctx.stroke();
 
-            // رسم شاشة عداد التثبيت بالبداية (3 ثوانٍ)
-            if (gameState === 'WAITING_START') {
-                ctx.fillStyle = 'rgba(11, 12, 16, 0.85)';
-                ctx.fillRect(0, 0, width, height);
-
-                const startCellX = mazeOffsetX + startPoint.col * cellSize + cellSize/2;
-                const startCellY = mazeOffsetY + startPoint.row * cellSize + cellSize/2;
-
-                let progress = 0;
-                if (startHoldStartTime !== null) {
-                    progress = Math.min(1, (Date.now() - startHoldStartTime) / requiredHoldTime);
-                }
-
-                // رسم دائرة العد التنازلي
+            // مؤشر اليد (الهدف)
+            if (input.active && input.mode === 'hand' && state !== 'OVER') {
                 ctx.beginPath();
-                ctx.arc(startCellX, startCellY, 45, 0, Math.PI * 2 * progress);
-                ctx.strokeStyle = '#00ffcc';
-                ctx.lineWidth = 8;
+                ctx.arc(input.x, input.y, Math.max(8, cell * 0.25), 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 4]);
                 ctx.stroke();
-
-                ctx.fillStyle = '#ffffff';
-                ctx.font = 'bold 24px Tahoma';
-                ctx.textAlign = 'center';
-                ctx.fillText('ثبت يدك في البداية!', width / 2, height / 2 - 40);
-                
-                const secondsLeft = Math.max(0, ((requiredHoldTime - (startHoldStartTime ? Date.now() - startHoldStartTime : 0)) / 1000).toFixed(1));
-                ctx.fillStyle = '#66fcf1';
-                ctx.font = 'bold 45px Tahoma';
-                ctx.fillText(`${secondsLeft} ثوانٍ`, width / 2, height / 2 + 20);
+                ctx.setLineDash([]);
             }
 
-            // رسم شاشة مهلة الاصطدام (2 ثانية)
-            if (gameState === 'COLLISION_PAUSE') {
-                ctx.fillStyle = 'rgba(255, 77, 77, 0.25)';
-                ctx.fillRect(0, 0, width, height);
-
-                ctx.fillStyle = '#ff4d4d';
-                ctx.font = 'bold 32px Tahoma';
-                ctx.textAlign = 'center';
-                ctx.fillText('⚠️ اصطدمت بالجدار! أخرج يدك بسرعة!', width / 2, height / 2 - 20);
-                
-                const pauseLeft = Math.max(0, ((2000 - (Date.now() - collisionTimer)) / 1000).toFixed(1));
-                ctx.fillStyle = '#ffffff';
-                ctx.font = 'bold 28px Tahoma';
-                ctx.fillText(`الوقت المتبقي للخروج: ${pauseLeft} ثوانٍ`, width / 2, height / 2 + 30);
+            // وضع الظلام
+            if (L.dark && (state === 'PLAYING' || state === 'BLOCKED')) {
+                const g = ctx.createRadialGradient(bx, by, cell * 1.6, bx, by, cell * 3.6);
+                g.addColorStop(0, 'rgba(11,12,16,0)');
+                g.addColorStop(1, 'rgba(11,12,16,0.95)');
+                ctx.fillStyle = g;
+                ctx.fillRect(offX, offY, gw * cell, gh * cell);
             }
 
-            if (!hasHand && gameState !== 'WAITING_START') {
-                ctx.fillStyle = 'rgba(255, 77, 77, 0.9)';
-                ctx.font = 'bold 20px Tahoma';
-                ctx.textAlign = 'center';
-                ctx.fillText('أين يدك؟ ارفع كف يدك أمام الكاميرا للتحكم!', width / 2, height - 35);
+            const cy = offY + gh * cell / 2;
+            if (state === 'WAITING_START') {
+                const need = input.mode === 'hand' ? HOLD_HAND : HOLD_POINTER;
+                const prog = holdStart === null ? 0 : Math.min(1, (now - holdStart) / need);
+                const sx = px(startCell.x + 0.5), sy = py(startCell.y + 0.5);
+                ctx.beginPath();
+                ctx.arc(sx, sy, cell * 0.85, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog);
+                ctx.strokeStyle = '#00ffcc';
+                ctx.lineWidth = Math.max(4, cell * 0.12);
+                ctx.stroke();
+                const how = input.mode === 'pointer' ? 'المس المربع الأخضر وثبّت إصبعك' : 'ثبّت يدك على المربع الأخضر';
+                textBox([how, input.active ? `${Math.max(0, ((need - (holdStart ? now - holdStart : 0)) / 1000)).toFixed(1)} ثانية` : 'ارفع كفك أمام الكاميرا أو المس الشاشة'],
+                        cy, ['#fff', '#66fcf1']);
+            } else if (state === 'BLOCKED') {
+                ctx.fillStyle = 'rgba(255,77,77,0.18)';
+                ctx.fillRect(0, 0, w, h);
+                const left = Math.max(0, (BLOCK_MS - (now - blockStart)) / 1000).toFixed(1);
+                textBox(['⚠️ اصطدمت بالجدار!', `أعد يدك إلى الممر خلال ${left} ث`], cy, ['#ff6b6b', '#fff']);
+            } else if (state === 'PLAYING' && !input.active) {
+                textBox(['أين يدك؟ ارفع كفك أو المس الشاشة'], cy, ['#ff6b6b']);
             }
         }
 
-        function gameLoop() {
-            updateGame();
-            drawMaze();
-
-            if (gameState === 'GAMEOVER') {
-                ctx.fillStyle = 'rgba(11, 12, 16, 0.88)';
-                ctx.fillRect(0, 0, width, height);
-                
-                uiTitle.innerText = "انتهت المحاولات! ❌";
-                uiTitle.style.color = "#ff4d4d";
-                uiDesc.innerHTML = "اصطدمت بالجدران 3 مرات. حاول التركيز أكثر في المرة القادمة!";
-                startBtn.innerText = "حاول مرة أخرى";
-                uiOverlay.classList.remove('hidden');
-                return;
-            } else if (gameState === 'WIN') {
-                ctx.fillStyle = 'rgba(11, 12, 16, 0.88)';
-                ctx.fillRect(0, 0, width, height);
-                
-                uiTitle.innerText = "مبروك! لقد فزت 🎉";
-                uiTitle.style.color = "#00ffcc";
-                uiDesc.innerHTML = "أتممت المتاهة بنجاح بمهارة عالية باستخدام كف يدك!";
-                startBtn.innerText = "لعب مجدداً";
-                uiOverlay.classList.remove('hidden');
-                return;
-            }
-
-            requestAnimationFrame(gameLoop);
+        function updateHud() {
+            const L = LEVELS[level];
+            const showLevel = state !== 'INIT';
+            hudLevel.textContent = showLevel ? `المستوى ${level + 1}: ${L.name}` : 'المتاهة';
+            const left = showLevel ? Math.max(0, Math.ceil((L.time * 1000 - elapsed) / 1000)) : 0;
+            hudTime.textContent = showLevel ? `⏱ ${left} ث` : '';
+            hudTime.className = left <= 15 && showLevel ? 'low' : '';
+            hudLives.textContent = showLevel ? '❤️'.repeat(Math.max(0, lives)) + '🖤'.repeat(MAX_LIVES - Math.max(0, lives)) : '';
         }
+
+        function loop(now) {
+            update(now);
+            draw(now);
+            updateHud();
+            requestAnimationFrame(loop);
+        }
+
+        // ابدأ الرسم فوراً وجهّز مستوى للعرض خلف القائمة
+        level = 0;
+        buildLevel();
+        requestAnimationFrame(loop);
+        buildPicker();
+        initAI();
     </script>
     <script src="remote-nav.js"></script>
 </body>

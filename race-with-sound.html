@@ -2,112 +2,63 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>لعبة تتبع الرأس</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-    
+    <script src="game-common.js"></script>
+
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background-color: #2c3e50;
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #1b2733;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             touch-action: none;
+            -webkit-user-select: none; user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
-        #gameCanvas {
-            display: block;
-            width: 100vw;
-            height: 100vh;
-        }
+        #gameCanvas { position: fixed; top: 0; left: 0; display: block; }
         #cameraContainer {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            width: 160px;
-            height: 120px;
-            border: 4px solid white;
-            border-radius: 10px;
-            overflow: hidden;
+            position: fixed;
+            bottom: calc(14px + env(safe-area-inset-bottom));
+            left: calc(14px + env(safe-area-inset-left));
+            width: 120px; height: 90px;
+            border: 3px solid white; border-radius: 10px; overflow: hidden;
             box-shadow: 0 4px 8px rgba(0,0,0,0.5);
-            background: #000;
-            z-index: 10;
+            background: #000; z-index: 10; opacity: 0.85; pointer-events: none;
         }
-        #videoElement {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1);
-        }
+        #videoElement { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
         .overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            background: rgba(0, 0, 0, 0.85);
-            color: white;
-            z-index: 20;
-            text-align: center;
-            padding: 20px;
-            box-sizing: border-box;
+            position: fixed; inset: 0;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(0, 0, 0, 0.88); color: white; z-index: 20;
+            text-align: center; padding: 16px; overflow-y: auto;
         }
-        h1 { font-size: 2.5rem; margin-bottom: 10px; color: #00d2ff; }
-        p { font-size: 1.2rem; margin-bottom: 20px; max-width: 80%; line-height: 1.5; }
-        .error-text {
-            color: #ff5252;
-            font-weight: bold;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 10px;
-            border-radius: 8px;
-            direction: ltr;
-        }
+        .overlay > * { flex-shrink: 0; }
+        h1 { font-size: clamp(1.7rem, 7vw, 2.6rem); margin: 0 0 10px; color: #00d2ff; }
+        p { font-size: clamp(0.95rem, 3.6vw, 1.2rem); margin: 0 0 16px; max-width: 520px; line-height: 1.6; }
+        .error-text { color: #ff5252; font-weight: bold; background: rgba(255,255,255,0.1); padding: 10px; border-radius: 8px; direction: ltr; display: inline-block; }
         button {
-            padding: 15px 40px;
-            font-size: 1.5rem;
-            background-color: #00d2ff;
-            color: #000;
-            font-weight: bold;
-            border: none;
-            border-radius: 50px;
-            cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            margin-top: 15px;
-            transition: transform 0.2s;
+            font-family: inherit;
+            padding: 12px 34px; font-size: clamp(1.05rem, 4.4vw, 1.4rem);
+            background-color: #00d2ff; color: #000; font-weight: bold; border: none;
+            border-radius: 50px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            margin-top: 10px; transition: transform 0.2s;
         }
         button:active { transform: scale(0.95); }
+        #modeButtons { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
         .hidden { display: none !important; }
         .loader {
-            border: 8px solid #333;
-            border-top: 8px solid #00d2ff;
-            border-radius: 50%;
-            width: 60px;
-            height: 60px;
-            animation: spin 1s linear infinite;
-            margin-bottom: 20px;
+            border: 8px solid #333; border-top: 8px solid #00d2ff; border-radius: 50%;
+            width: 56px; height: 56px; animation: spin 1s linear infinite; margin-bottom: 18px;
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        #headPointer {
-            position: absolute;
-            width: 24px;
-            height: 24px;
-            background-color: rgba(0, 210, 255, 0.8);
-            border-radius: 50%;
-            border: 3px solid white;
-            pointer-events: none;
-            z-index: 15;
-            transition: top 0.05s, left 0.05s;
-            display: none;
-            transform: translate(-50%, -50%);
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-height: 460px) {
+            h1 { margin-bottom: 4px; } p { margin-bottom: 8px; }
+            button { padding: 8px 22px; }
+            #cameraContainer { width: 84px; height: 63px; }
         }
     </style>
 </head>
@@ -115,89 +66,54 @@
     <div id="uiOverlay" class="overlay">
         <div id="loader" class="loader hidden"></div>
         <h1 id="uiTitle">لعبة التتبع الذكية</h1>
-        <p id="uiDesc">اختر طريقة التحكم بالشخصية يميناً ويساراً.</p>
-        
-        <div id="modeButtons" style="display: flex; gap: 15px; margin-top: 10px;">
+        <p id="uiDesc">اختر طريقة التحكم بالسيارة يميناً ويساراً. اجمع النجوم ⭐ وتجنب العوائق، وانتبه للمستويات الأسرع!</p>
+        <div id="bestLine" class="hidden"></div>
+
+        <div id="modeButtons">
             <button id="btnHeadMode">بحركة الرأس 🧑</button>
-            <button id="btnHandMode" style="background-color: #ff5722;">بكف اليد ✋</button>
+            <button id="btnHandMode" style="background-color: #ff5722; color:#fff;">بكف اليد ✋</button>
+            <button id="btnTouchMode" style="background-color: #8bc34a;">باللمس / الفأرة 👆</button>
         </div>
 
         <button id="startBtn" class="hidden">ابدأ اللعب</button>
         <button id="retryBtn" class="hidden" onclick="location.reload()">تحديث الصفحة</button>
     </div>
 
-    <div id="cameraContainer">
-        <video id="videoElement" autoplay playsinline></video>
+    <div id="cameraContainer" class="hidden">
+        <video id="videoElement" autoplay playsinline muted></video>
     </div>
-
-    <div id="headPointer"></div>
     <canvas id="gameCanvas"></canvas>
 
     <script>
+        /* ---------------- الصوت ---------------- */
         let audioCtx = null;
         let bgmInterval = null;
 
         function initAudio() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
+            audioCtx = GC.audioInit();
         }
 
-        // أصوات تفاعلية باستخدام Web Audio API بدون ملفات خارجية
         const SoundFX = {
-            playCollect() {
+            tone(freq, to, dur, type, vol) {
                 initAudio();
                 if (!audioCtx) return;
-                let osc = audioCtx.createOscillator();
-                let gain = audioCtx.createGain();
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(400, audioCtx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.15);
-                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-                gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
-                osc.connect(gain);
-                gain.connect(audioCtx.destination);
-                osc.start();
-                osc.stop(audioCtx.currentTime + 0.15);
+                const t = audioCtx.currentTime;
+                const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+                o.type = type;
+                o.frequency.setValueAtTime(freq, t);
+                if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
+                g.gain.setValueAtTime(vol, t);
+                g.gain.exponentialRampToValueAtTime(0.01, t + dur);
+                o.connect(g); g.connect(audioCtx.destination);
+                o.start(t); o.stop(t + dur);
             },
-            playHit() {
-                initAudio();
-                if (!audioCtx) return;
-                let osc = audioCtx.createOscillator();
-                let gain = audioCtx.createGain();
-                osc.type = 'sawtooth';
-                osc.frequency.setValueAtTime(150, audioCtx.currentTime);
-                osc.frequency.linearRampToValueAtTime(60, audioCtx.currentTime + 0.3);
-                gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
-                gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-                osc.connect(gain);
-                gain.connect(audioCtx.destination);
-                osc.start();
-                osc.stop(audioCtx.currentTime + 0.3);
-            },
-            playGameOver() {
-                initAudio();
-                if (!audioCtx) return;
-                let now = audioCtx.currentTime;
-                [300, 240, 180, 100].forEach((freq, index) => {
-                    let osc = audioCtx.createOscillator();
-                    let gain = audioCtx.createGain();
-                    osc.type = 'square';
-                    osc.frequency.setValueAtTime(freq, now + (index * 0.15));
-                    gain.gain.setValueAtTime(0.2, now + (index * 0.15));
-                    gain.gain.linearRampToValueAtTime(0.01, now + (index * 0.15) + 0.15);
-                    osc.connect(gain);
-                    gain.connect(audioCtx.destination);
-                    osc.start(now + (index * 0.15));
-                    osc.stop(now + (index * 0.15) + 0.15);
-                });
-            }
+            playCollect() { this.tone(400, 800, 0.15, 'sine', 0.3); },
+            playHit() { this.tone(150, 60, 0.3, 'sawtooth', 0.4); },
+            playHeart() { this.tone(500, 1000, 0.25, 'triangle', 0.3); },
+            playLevelUp() { [523, 659, 784].forEach((f, i) => setTimeout(() => this.tone(f, 0, 0.18, 'triangle', 0.25), i * 110)); },
+            playGameOver() { [300, 240, 180, 100].forEach((f, i) => setTimeout(() => this.tone(f, 0, 0.15, 'square', 0.2), i * 150)); }
         };
 
-        // نظام تشغيل موسيقى خلفية مستمرة أثناء اللعب
         const BGM = {
             notes: [220, 261.63, 329.63, 392, 440, 392, 329.63, 261.63],
             step: 0,
@@ -207,143 +123,139 @@
                     if (gameState !== 'PLAYING') return;
                     initAudio();
                     if (!audioCtx) return;
-
-                    let osc = audioCtx.createOscillator();
-                    let gain = audioCtx.createGain();
-                    osc.type = 'triangle';
-                    
-                    let freq = this.notes[this.step];
-                    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-                    
-                    gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
-                    gain.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
-                    
-                    osc.connect(gain);
-                    gain.connect(audioCtx.destination);
-                    
-                    osc.start();
-                    osc.stop(audioCtx.currentTime + 0.35);
-
+                    const t = audioCtx.currentTime;
+                    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+                    o.type = 'triangle';
+                    o.frequency.setValueAtTime(this.notes[this.step], t);
+                    g.gain.setValueAtTime(0.05, t);
+                    g.gain.linearRampToValueAtTime(0.001, t + 0.35);
+                    o.connect(g); g.connect(audioCtx.destination);
+                    o.start(t); o.stop(t + 0.35);
                     this.step = (this.step + 1) % this.notes.length;
                 }, 400);
             },
             stop() {
-                if (bgmInterval) {
-                    clearInterval(bgmInterval);
-                    bgmInterval = null;
-                }
+                if (bgmInterval) { clearInterval(bgmInterval); bgmInterval = null; }
                 this.step = 0;
             }
         };
 
+        /* ---------------- العناصر والحالة ---------------- */
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const videoElement = document.getElementById('videoElement');
+        const cameraContainer = document.getElementById('cameraContainer');
         const uiOverlay = document.getElementById('uiOverlay');
         const uiTitle = document.getElementById('uiTitle');
         const uiDesc = document.getElementById('uiDesc');
         const loader = document.getElementById('loader');
         const startBtn = document.getElementById('startBtn');
         const retryBtn = document.getElementById('retryBtn');
-        const headPointer = document.getElementById('headPointer');
+        const modeButtons = document.getElementById('modeButtons');
+        const bestLine = document.getElementById('bestLine');
+        const input = GC.input;
 
-        let isGameRunning = false;
-        let score = 0;
-        let lives = 3;
-        let frameCount = 0;
-        let gameState = 'INIT';
-        let roadOffset = 0;
-
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-
-        const player = {
-            width: 60,
-            height: 80,
-            x: canvas.width / 2 - 30,
-            y: canvas.height - 120,
-            targetX: canvas.width / 2 - 30,
-            color: '#FFD700'
-        };
-
+        const MAX_LIVES = 5;
+        const STAR_PER_LEVEL = 8;     // عدد النجوم لرفع المستوى
+        let gameState = 'INIT';       // INIT, PLAYING, GAMEOVER
+        let trackingMode = '';        // HEAD, HAND, TOUCH
+        let score = 0, lives = 3, level = 1, stars = 0;
+        let best = GC.store.get('race_best');
         let items = [];
-        let trackingMode = '';
+        let particles = [];
+        let spawnTimer = 0;
+        let roadOffset = 0;
+        let invincible = 0;           // مهلة قصيرة بعد الاصطدام
+        let flash = 0;
+        let banner = { text: '', t: 0 };
 
-        window.addEventListener('resize', () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            player.y = canvas.height - 120;
-        });
+        let w = 0, h = 0, S = 1, roadL = 0, roadW = 0;
+        const player = { x: 0, y: 0, w: 50, h: 70, targetX: 0, color: '#FFD700', tilt: 0 };
 
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            uiTitle.innerText = "المتصفح غير مدعوم!";
-            uiDesc.innerHTML = "متصفحك الحالي لا يدعم تشغيل الكاميرا.";
-            document.getElementById('modeButtons').classList.add('hidden');
+        function layout() {
+            const oldCenter = roadW ? (player.x + player.w / 2 - roadL) / roadW : 0.5;
+            w = GC.view.w; h = GC.view.h;
+            S = Math.max(0.5, Math.min(1.5, h / 700));
+            roadW = Math.min(w, 720);
+            roadL = (w - roadW) / 2;
+            const carH = Math.max(44, Math.min(roadW * 0.2, h * 0.18, 110));
+            player.h = carH;
+            player.w = carH / 1.4;
+            player.y = h - player.h - Math.max(70, h * 0.1);
+            player.x = roadL + oldCenter * roadW - player.w / 2;
+            player.targetX = player.x;
         }
-        // أزرار اختيار وضع اللعب
-        document.getElementById('btnHeadMode').addEventListener('click', () => {
-            initAudio();
-            trackingMode = 'HEAD';
-            startAiLoading();
-            initMediaPipePose();
-        });
+        GC.fitCanvas(canvas, layout);
 
-        document.getElementById('btnHandMode').addEventListener('click', () => {
+        /* ---------------- اختيار طريقة التحكم ---------------- */
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            document.getElementById('btnHeadMode').classList.add('hidden');
+            document.getElementById('btnHandMode').classList.add('hidden');
+        }
+        if (best) {
+            bestLine.textContent = `🏆 أفضل نتيجة: ${best}`;
+            bestLine.classList.remove('hidden');
+            bestLine.style.marginBottom = '10px';
+        }
+
+        document.getElementById('btnHeadMode').addEventListener('click', () => { initAudio(); trackingMode = 'HEAD'; startAiLoading(); initMediaPipePose(); });
+        document.getElementById('btnHandMode').addEventListener('click', () => { initAudio(); trackingMode = 'HAND'; startAiLoading(); initMediaPipeHands(); });
+        document.getElementById('btnTouchMode').addEventListener('click', () => {
             initAudio();
-            trackingMode = 'HAND';
-            startAiLoading();
-            initMediaPipeHands();
+            trackingMode = 'TOUCH';
+            modeButtons.classList.add('hidden');
+            uiTitle.innerText = 'جاهز!';
+            uiDesc.innerText = 'حرّك إصبعك (أو الفأرة) يميناً ويساراً للتحكم بالسيارة.';
+            startBtn.classList.remove('hidden');
         });
 
         function startAiLoading() {
-            document.getElementById('modeButtons').classList.add('hidden');
+            modeButtons.classList.add('hidden');
             loader.classList.remove('hidden');
-            uiTitle.innerText = "جاري التشغيل...";
-            uiDesc.innerText = "الرجاء الانتظار ريثما نجهز الكاميرا والذكاء الاصطناعي.";
+            uiTitle.innerText = 'جاري التشغيل...';
+            uiDesc.innerText = 'الرجاء الانتظار ريثما نجهز الكاميرا والذكاء الاصطناعي.';
         }
 
-        function setupCamera(aiModel) {
-            const camera = new Camera(videoElement, {
-                onFrame: async () => {
-                    await aiModel.send({image: videoElement});
-                },
-                width: 640,
-                height: 480,
-                facingMode: 'user'
-            });
-
-            camera.start()
+        function setupCamera(model) {
+            GC.startCamera(videoElement, model)
                 .then(() => {
-                    uiTitle.innerText = "تم بنجاح!";
-                    let modeText = trackingMode === 'HEAD' ? "حرك رأسك يميناً ويساراً" : "وجه كف يدك للكاميرا وحركه يميناً ويساراً";
-                    uiDesc.innerText = `ابتعد قليلاً عن الكاميرا. ${modeText} لتتحكم بالشخصية.`;
+                    cameraContainer.classList.remove('hidden');
+                    uiTitle.innerText = 'تم بنجاح!';
+                    const modeText = trackingMode === 'HEAD' ? 'حرّك رأسك يميناً ويساراً' : 'وجّه كف يدك للكاميرا وحرّكه يميناً ويساراً';
+                    uiDesc.innerText = `ابتعد قليلاً عن الكاميرا. ${modeText} لتتحكم بالسيارة (أو المس الشاشة).`;
                     loader.classList.add('hidden');
                     startBtn.classList.remove('hidden');
                 })
                 .catch((err) => {
-                    uiTitle.innerText = "تعذر فتح الكاميرا 😔";
-                    let errorMsg = err.name || err.message || String(err);
-                    uiDesc.innerHTML = `الرجاء التأكد من الصلاحيات. <br><br> <span class="error-text">الخطأ: ${errorMsg}</span>`;
+                    uiTitle.innerText = 'تعذر فتح الكاميرا 😔';
+                    const msg = err.name || err.message || String(err);
+                    uiDesc.innerHTML = `الرجاء التأكد من الصلاحيات، أو العب باللمس.<br><br><span class="error-text">الخطأ: ${msg}</span>`;
                     loader.classList.add('hidden');
-                    retryBtn.classList.remove('hidden');
+                    modeButtons.classList.remove('hidden');
+                    document.getElementById('btnHeadMode').classList.add('hidden');
+                    document.getElementById('btnHandMode').classList.add('hidden');
                 });
         }
 
+        const isMobile = /Android|iPhone|iPad|Mobi/i.test(navigator.userAgent);
+
         function initMediaPipePose() {
-            const pose = new Pose({
-                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-            });
+            const pose = new Pose({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
             pose.setOptions({ modelComplexity: 0, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-            pose.onResults(onPoseResults);
+            pose.onResults((r) => {
+                if (r.poseLandmarks && r.poseLandmarks.length > 0) GC.setHand(r.poseLandmarks[0].x, r.poseLandmarks[0].y);
+                else GC.clearHand();
+            });
             setupCamera(pose);
         }
 
         function initMediaPipeHands() {
-            const hands = new Hands({
-                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+            hands.setOptions({ maxNumHands: 1, modelComplexity: isMobile ? 0 : 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+            hands.onResults((r) => {
+                if (r.multiHandLandmarks && r.multiHandLandmarks.length > 0) GC.setHand(r.multiHandLandmarks[0][9].x, r.multiHandLandmarks[0][9].y);
+                else GC.clearHand();
             });
-            hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-            hands.onResults(onHandResults);
             setupCamera(hands);
         }
 
@@ -353,244 +265,279 @@
             startGame();
         });
 
-        function updatePointerAndPlayer(normalizedX, normalizedY) {
-            headPointer.style.display = 'block';
-            const screenX = (1 - normalizedX) * window.innerWidth;
-            const screenY = normalizedY * window.innerHeight;
-            
-            headPointer.style.left = `${screenX}px`;
-            headPointer.style.top = `${screenY}px`;
-            player.targetX = screenX - (player.width / 2);
-        }
-
-        function onPoseResults(results) {
-            if (gameState !== 'PLAYING') {
-                headPointer.style.display = 'none';
-                return;
-            }
-            if (results.poseLandmarks && results.poseLandmarks.length > 0) {
-                const nose = results.poseLandmarks[0];
-                updatePointerAndPlayer(nose.x, nose.y);
-            } else {
-                headPointer.style.display = 'none';
-            }
-        }
-
-        function onHandResults(results) {
-            if (gameState !== 'PLAYING') {
-                headPointer.style.display = 'none';
-                return;
-            }
-            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                const palm = results.multiHandLandmarks[0][9];
-                updatePointerAndPlayer(palm.x, palm.y);
-            } else {
-                headPointer.style.display = 'none';
-            }
-        }
-
+        /* ---------------- منطق اللعبة ---------------- */
         function startGame() {
             gameState = 'PLAYING';
-            score = 0;
-            lives = 3; // إعادة تعيين المحاولات
-            frameCount = 0;
-            items = []; // تصفير العناصر
-            player.x = canvas.width / 2 - player.width / 2;
+            score = 0; lives = 3; level = 1; stars = 0;
+            items = []; particles = [];
+            spawnTimer = 0.5; invincible = 0; flash = 0;
+            player.x = w / 2 - player.w / 2;
             player.targetX = player.x;
-            BGM.start(); // بدء تشغيل الموسيقى الخلفية
-            gameLoop();
+            banner = { text: 'المستوى 1', t: 1.5 };
+            BGM.start();
+            lastT = performance.now();
         }
 
         function gameOver() {
             gameState = 'GAMEOVER';
-            BGM.stop(); // إيقاف موسيقى الخلفية
+            BGM.stop();
             SoundFX.playGameOver();
-            headPointer.style.display = 'none';
+            GC.vibrate([80, 40, 120]);
+            let msg = `النتيجة النهائية: ${score} — وصلت للمستوى ${level}`;
+            if (score > best) { best = score; GC.store.set('race_best', best); msg += '<br>🎉 رقم قياسي جديد!'; }
             uiOverlay.classList.remove('hidden');
             loader.classList.add('hidden');
-            uiTitle.innerText = "انتهت اللعبة!";
-            uiTitle.style.color = "#ff5252";
-            uiDesc.innerText = `نفدت محاولاتك! النتيجة النهائية: ${score}`;
-            startBtn.innerText = "العب مرة أخرى";
+            uiTitle.innerText = 'انتهت اللعبة!';
+            uiTitle.style.color = '#ff5252';
+            uiDesc.innerHTML = msg;
+            startBtn.innerText = 'العب مرة أخرى';
             startBtn.classList.remove('hidden');
             retryBtn.classList.add('hidden');
         }
 
-        function spawnItem() {
-            const type = Math.random() > 0.4 ? 'BAD' : 'GOOD';
-            const size = type === 'BAD' ? (60 + Math.random() * 80) : 50;
-            const x = Math.random() * (canvas.width - size);
-            const speed = 6 + (score * 0.1); 
+        function burst(x, y, color, n) {
+            for (let i = 0; i < n; i++) {
+                particles.push({ x, y, color, vx: (Math.random() - 0.5) * 8 * S, vy: (Math.random() - 0.5) * 8 * S, life: 1, size: 2 + Math.random() * 4 });
+            }
+        }
 
+        function spawnItem() {
+            const badChance = Math.min(0.68, 0.5 + level * 0.025);
+            const r = Math.random();
+            const unit = player.w;
+            let type = 'GOOD';
+            if (r < badChance) type = 'BAD';
+            else if (r > 0.96 && lives < MAX_LIVES) type = 'HEART';
+            let iw, ih;
+            if (type === 'BAD') { iw = unit * (1 + Math.random() * 1.1); ih = unit * 0.75; }
+            else { iw = ih = unit * 0.8; }
+            iw = Math.min(iw, roadW * 0.45);
             items.push({
-                x: x,
-                y: -100,
-                width: size,
-                height: type === 'BAD' ? 40 : size,
-                type: type,
-                speed: speed
+                x: roadL + Math.random() * (roadW - iw), y: -ih - 10,
+                w: iw, h: ih, type,
+                speed: (5.5 + level * 0.9 + Math.random()) * S
             });
         }
 
-        function update() {
+        let lastT = performance.now();
+        function update(now) {
+            const k = Math.max(0.1, Math.min((now - lastT) / 16.667, 3));
+            lastT = now;
             if (gameState !== 'PLAYING') return;
-            frameCount++;
 
-            player.x += (player.targetX - player.x) * 0.15;
+            // التحكم: اللمس/الفأرة مباشرة، واليد/الرأس تغطي عرض الطريق كاملاً
+            if (input.active) {
+                const nx = input.mode === 'hand' ? roadL + (input.x / w) * roadW : input.x;
+                player.targetX = nx - player.w / 2;
+            }
+            const prevX = player.x;
+            player.x += (player.targetX - player.x) * Math.min(1, 0.18 * k);
+            player.x = Math.max(roadL, Math.min(roadL + roadW - player.w, player.x));
+            player.tilt += (Math.max(-1, Math.min(1, (player.x - prevX) / (6 * S * k))) - player.tilt) * 0.2;
 
-            if (player.x < 0) player.x = 0;
-            if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
-
-            if (frameCount % 45 === 0) {
+            spawnTimer -= k / 60;
+            if (spawnTimer <= 0) {
                 spawnItem();
+                spawnTimer = Math.max(0.32, 0.8 - level * 0.05) * (0.8 + Math.random() * 0.4);
             }
 
+            if (invincible > 0) invincible -= k / 60;
+            if (flash > 0) flash -= k / 60;
+            if (banner.t > 0) banner.t -= k / 60;
+            roadOffset = (roadOffset + (5 + level * 0.8) * S * k) % (70 * S);
+
             for (let i = items.length - 1; i >= 0; i--) {
-                let item = items[i];
-                item.y += item.speed;
+                const it = items[i];
+                it.y += it.speed * k;
+                if (it.y > h + 20) { items.splice(i, 1); continue; }
 
-                if (
-                    player.x < item.x + item.width &&
-                    player.x + player.width > item.x &&
-                    player.y < item.y + item.height &&
-                    player.y + player.height > item.y
-                ) {
-                    if (item.type === 'BAD') {
-                        lives--;
-                        items.splice(i, 1);
-                        SoundFX.playHit();
-                        
-                        player.color = '#ff5252';
-                        setTimeout(() => player.color = '#FFD700', 300);
+                const hit = player.x < it.x + it.w && player.x + player.w > it.x &&
+                            player.y < it.y + it.h && player.y + player.h > it.y;
+                if (!hit) continue;
 
-                        if (lives <= 0) {
-                            gameOver();
-                        }
-                    } else if (item.type === 'GOOD') {
-                        score += 10;
-                        items.splice(i, 1);
-                        SoundFX.playCollect();
-
-                        player.color = '#2ECC40';
-                        setTimeout(() => player.color = '#FFD700', 300);
-                    }
-                    continue;
-                }
-
-                if (item.y > canvas.height) {
+                if (it.type === 'BAD') {
+                    if (invincible > 0) continue;
+                    lives--;
+                    invincible = 1.2; flash = 0.3;
                     items.splice(i, 1);
+                    SoundFX.playHit();
+                    GC.vibrate(150);
+                    burst(it.x + it.w / 2, it.y + it.h / 2, '#ff4136', 14);
+                    if (lives <= 0) { gameOver(); return; }
+                } else if (it.type === 'HEART') {
+                    lives = Math.min(MAX_LIVES, lives + 1);
+                    items.splice(i, 1);
+                    SoundFX.playHeart();
+                    burst(it.x + it.w / 2, it.y + it.h / 2, '#ff6b9d', 12);
+                } else {
+                    score += 10;
+                    stars++;
+                    items.splice(i, 1);
+                    SoundFX.playCollect();
+                    burst(it.x + it.w / 2, it.y + it.h / 2, '#ffe066', 10);
+                    if (stars >= STAR_PER_LEVEL) {
+                        stars = 0; level++;
+                        banner = { text: `المستوى ${level} 🚀`, t: 1.8 };
+                        SoundFX.playLevelUp();
+                    }
                 }
+            }
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx * k; p.y += p.vy * k; p.life -= 0.04 * k;
+                if (p.life <= 0) particles.splice(i, 1);
             }
         }
 
+        /* ---------------- الرسم ---------------- */
         function drawBackground() {
+            ctx.fillStyle = '#2f4a2f';
+            ctx.fillRect(0, 0, w, h);
             ctx.fillStyle = '#2c3e50';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillRect(roadL, 0, roadW, h);
+            // حواف الطريق
+            ctx.fillStyle = '#ecf0f1';
+            ctx.fillRect(roadL - 5, 0, 5, h);
+            ctx.fillRect(roadL + roadW, 0, 5, h);
 
             ctx.strokeStyle = '#95a5a6';
             ctx.lineWidth = 4;
-            ctx.setLineDash([30, 40]);
-
-            roadOffset = (roadOffset + 5 + score * 0.1) % 70;
+            ctx.setLineDash([30 * S, 40 * S]);
             ctx.lineDashOffset = -roadOffset;
-
             ctx.beginPath();
-            ctx.moveTo(canvas.width * 0.33, 0);
-            ctx.lineTo(canvas.width * 0.33, canvas.height);
-            ctx.moveTo(canvas.width * 0.66, 0);
-            ctx.lineTo(canvas.width * 0.66, canvas.height);
+            ctx.moveTo(roadL + roadW / 3, 0); ctx.lineTo(roadL + roadW / 3, h);
+            ctx.moveTo(roadL + roadW * 2 / 3, 0); ctx.lineTo(roadL + roadW * 2 / 3, h);
             ctx.stroke();
-
             ctx.setLineDash([]);
         }
 
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            drawBackground();
+        function drawCar() {
+            const { x, y, w: cw, h: ch } = player;
+            const blink = invincible > 0 && Math.floor(invincible * 10) % 2 === 0;
+            if (blink) ctx.globalAlpha = 0.4;
+            ctx.save();
+            ctx.translate(x + cw / 2, y + ch / 2);
+            ctx.rotate(player.tilt * 0.12);
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.beginPath(); ctx.roundRect(-cw / 2 + 4, -ch / 2 + 5, cw, ch, 10); ctx.fill();
+            // عجلات
+            ctx.fillStyle = '#111';
+            [[-1, -0.28], [1, -0.28], [-1, 0.3], [1, 0.3]].forEach(([sx, sy]) => {
+                ctx.fillRect(sx * cw / 2 - 3, sy * ch - ch * 0.09, 6, ch * 0.18);
+            });
+            ctx.fillStyle = player.color;
+            ctx.beginPath(); ctx.roundRect(-cw / 2, -ch / 2, cw, ch, 10); ctx.fill();
+            ctx.fillStyle = 'rgba(255,255,255,0.25)';
+            ctx.fillRect(-cw / 2 + cw * 0.45, -ch / 2 + 6, cw * 0.1, ch - 12); // خط
+            ctx.fillStyle = '#1b2733';
+            ctx.beginPath(); ctx.roundRect(-cw * 0.36, -ch * 0.16, cw * 0.72, ch * 0.3, 6); ctx.fill(); // الزجاج
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(-cw * 0.28, -ch / 2 + 7, cw * 0.1, 0, Math.PI * 2);
+            ctx.arc(cw * 0.28, -ch / 2 + 7, cw * 0.1, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+            ctx.globalAlpha = 1;
+        }
 
-            if (gameState === 'PLAYING' || gameState === 'GAMEOVER') {
-                for (let item of items) {
-                    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-                    ctx.fillRect(item.x + 5, item.y + 5, item.width, item.height);
-
-                    if (item.type === 'BAD') {
-                        ctx.fillStyle = '#FF4136';
-                        ctx.fillRect(item.x, item.y, item.width, item.height);
-                        ctx.strokeStyle = '#fff';
-                        ctx.lineWidth = 2;
-                        ctx.strokeRect(item.x, item.y, item.width, item.height);
-
-                        ctx.strokeStyle = '#fff';
-                        ctx.lineWidth = 3;
-                        ctx.beginPath();
-                        ctx.moveTo(item.x + 10, item.y + 10);
-                        ctx.lineTo(item.x + item.width - 10, item.y + item.height - 10);
-                        ctx.moveTo(item.x + item.width - 10, item.y + 10);
-                        ctx.lineTo(item.x + 10, item.y + item.height - 10);
-                        ctx.stroke();
-                    } else if (item.type === 'GOOD') {
-                        const radius = item.width / 2;
-                        const cx = item.x + radius;
-                        const cy = item.y + radius;
-
-                        ctx.fillStyle = '#2ECC40';
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-                        ctx.fill();
-                        ctx.strokeStyle = '#fff';
-                        ctx.lineWidth = 2;
-                        ctx.stroke();
-
-                        ctx.strokeStyle = '#fff';
-                        ctx.lineWidth = 4;
-                        ctx.beginPath();
-                        ctx.moveTo(cx, cy - radius + 10);
-                        ctx.lineTo(cx, cy + radius - 10);
-                        ctx.moveTo(cx - radius + 10, cy);
-                        ctx.lineTo(cx + radius - 10, cy);
-                        ctx.stroke();
-                    }
+        function drawItem(it) {
+            ctx.fillStyle = 'rgba(0,0,0,0.35)';
+            ctx.beginPath(); ctx.roundRect(it.x + 4, it.y + 4, it.w, it.h, 8); ctx.fill();
+            if (it.type === 'BAD') {
+                ctx.fillStyle = '#FF4136';
+                ctx.beginPath(); ctx.roundRect(it.x, it.y, it.w, it.h, 8); ctx.fill();
+                // خطوط تحذير
+                ctx.save();
+                ctx.beginPath(); ctx.roundRect(it.x, it.y, it.w, it.h, 8); ctx.clip();
+                ctx.fillStyle = '#fff';
+                for (let sx = it.x - it.h; sx < it.x + it.w; sx += it.h * 0.9) {
+                    ctx.beginPath();
+                    ctx.moveTo(sx, it.y + it.h); ctx.lineTo(sx + it.h * 0.3, it.y + it.h);
+                    ctx.lineTo(sx + it.h * 1.3, it.y); ctx.lineTo(sx + it.h, it.y);
+                    ctx.fill();
                 }
-
-                ctx.fillStyle = 'rgba(0,0,0,0.5)';
-                ctx.fillRect(player.x + 5, player.y + 5, player.width, player.height);
-
-                ctx.fillStyle = player.color;
-                ctx.beginPath();
-                ctx.roundRect(player.x, player.y, player.width, player.height, 10);
-                ctx.fill();
-
-                ctx.fillStyle = 'white';
-                ctx.beginPath();
-                ctx.arc(player.x + 15, player.y + 15, 8, 0, Math.PI*2);
-                ctx.arc(player.x + player.width - 15, player.y + 15, 8, 0, Math.PI*2);
-                ctx.fill();
-
-                ctx.fillStyle = '#00d2ff';
-                ctx.font = 'bold 36px Arial';
-                ctx.textAlign = 'left';
-                ctx.shadowColor = "black";
-                ctx.shadowBlur = 4;
-                ctx.fillText(`النقاط: ${score}`, 20, 50);
-
-                ctx.fillStyle = '#ff5252';
-                ctx.textAlign = 'right';
-                const hearts = '❤️'.repeat(Math.max(0, lives));
-                ctx.fillText(`القلوب: ${hearts}`, canvas.width - 20, 50);
-
+                ctx.restore();
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.roundRect(it.x, it.y, it.w, it.h, 8); ctx.stroke();
+            } else {
+                const cx = it.x + it.w / 2, cy = it.y + it.h / 2, r = it.w / 2;
+                ctx.shadowColor = it.type === 'HEART' ? '#ff6b9d' : '#ffe066';
+                ctx.shadowBlur = 14;
+                ctx.fillStyle = it.type === 'HEART' ? '#ff4d79' : '#2ECC40';
+                ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
                 ctx.shadowBlur = 0;
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+                ctx.fillStyle = '#fff';
+                ctx.font = `bold ${r * 1.2}px Arial`;
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(it.type === 'HEART' ? '♥' : '★', cx, cy + r * 0.05);
             }
         }
 
-        function gameLoop() {
-            if (gameState === 'PLAYING') {
-                update();
-                draw();
-                requestAnimationFrame(gameLoop);
-            } else if (gameState === 'GAMEOVER') {
-                draw();
+        function drawHud() {
+            const fs = Math.max(16, Math.min(w * 0.05, 30));
+            ctx.font = `bold ${fs}px Arial`;
+            ctx.textBaseline = 'top';
+            ctx.shadowColor = 'black'; ctx.shadowBlur = 4;
+            const top = 10 + 6;
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#00d2ff';
+            ctx.fillText(`النقاط: ${score}`, 14, top);
+            ctx.font = `${fs * 0.7}px Arial`;
+            ctx.fillStyle = '#ffd54f';
+            ctx.fillText(`المستوى ${level}  •  🏆 ${Math.max(best, score)}`, 14, top + fs * 1.25);
+            ctx.font = `bold ${fs}px Arial`;
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#ff5252';
+            ctx.fillText('❤️'.repeat(Math.max(0, lives)), w - 14, top);
+            // شريط التقدم للمستوى التالي
+            const bw = Math.min(w * 0.4, 220), bx = w - 14 - bw, by = top + fs * 1.35;
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = 'rgba(255,255,255,0.2)';
+            ctx.fillRect(bx, by, bw, 8);
+            ctx.fillStyle = '#ffe066';
+            ctx.fillRect(bx, by, bw * stars / STAR_PER_LEVEL, 8);
+            ctx.shadowBlur = 0;
+
+            if (banner.t > 0) {
+                ctx.globalAlpha = Math.min(1, banner.t);
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.font = `bold ${Math.max(30, Math.min(w * 0.1, 64))}px Tahoma`;
+                ctx.fillStyle = '#fff';
+                ctx.shadowColor = '#00d2ff'; ctx.shadowBlur = 20;
+                ctx.fillText(banner.text, w / 2, h * 0.3);
+                ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+            }
+            if (trackingMode !== 'TOUCH' && !input.active && gameState === 'PLAYING') {
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.font = `bold ${Math.max(14, Math.min(w * 0.04, 22))}px Tahoma`;
+                ctx.fillStyle = 'rgba(255,110,110,0.95)';
+                ctx.fillText('لا أراك! قف أمام الكاميرا أو المس الشاشة', w / 2, h * 0.5);
             }
         }
+
+        function draw() {
+            GC.begin(ctx);
+            drawBackground();
+            if (gameState === 'PLAYING' || gameState === 'GAMEOVER') {
+                items.forEach(drawItem);
+                drawCar();
+                particles.forEach(p => {
+                    ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+                });
+                ctx.globalAlpha = 1;
+                if (flash > 0) { ctx.fillStyle = `rgba(255,50,50,${flash})`; ctx.fillRect(0, 0, w, h); }
+                drawHud();
+            }
+        }
+
+        function loop(now) {
+            update(now);
+            draw();
+            requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
     </script>
     <script src="remote-nav.js"></script>
 </body>
