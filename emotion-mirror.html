@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>مرآة المشاعر</title>
+    <script src="game-common.js"></script>
+    <script src="edu-common.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #2a1020; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = EDU.makeVideo();
+        let w = 0, h = 0, portrait = false;
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; portrait = h > w * 1.05; });
+
+        /* ---------------- المشاعر وكشفها من تعابير الوجه ---------------- */
+        const EMO = {
+            happy:     { n: 'سعيد',    e: '😊', c: '#facc15', hint: 'ابتسم ابتسامة عريضة' },
+            sad:       { n: 'حزين',    e: '😢', c: '#60a5fa', hint: 'اجعل طرفي فمك للأسفل' },
+            surprised: { n: 'متفاجئ',  e: '😮', c: '#fb923c', hint: 'افتح فمك وارفع حاجبيك' },
+            angry:     { n: 'غاضب',    e: '😠', c: '#ef4444', hint: 'قطّب حاجبيك' },
+            sleepy:    { n: 'نعسان',   e: '😴', c: '#a78bfa', hint: 'أغمض عينيك' },
+            wink:      { n: 'يغمز',    e: '😉', c: '#34d399', hint: 'أغمض عيناً واحدة فقط' },
+            kiss:      { n: 'يرسل قبلة', e: '😘', c: '#f472b6', hint: 'ضمّ شفتيك للأمام' },
+            disgust:   { n: 'مستاء',   e: '🤢', c: '#84cc16', hint: 'اعقد أنفك (كأنك شممت رائحة سيئة)' }
+        };
+        const avg = (s, a, b) => ((s[a] || 0) + (s[b] || 0)) / 2;
+        function classifyFace(s) {
+            if (!s) return null;
+            const sc = {
+                happy: avg(s, 'mouthSmileLeft', 'mouthSmileRight') / 0.45,
+                sad: Math.max(avg(s, 'mouthFrownLeft', 'mouthFrownRight') / 0.3, (s.browInnerUp || 0) > 0.45 && avg(s, 'mouthFrownLeft', 'mouthFrownRight') > 0.12 ? 1.1 : 0),
+                surprised: (s.jawOpen || 0) > 0.3 ? Math.min((s.jawOpen || 0) / 0.35, Math.max((s.browInnerUp || 0), avg(s, 'eyeWideLeft', 'eyeWideRight')) / 0.3) : 0,
+                angry: avg(s, 'browDownLeft', 'browDownRight') / 0.45 * (avg(s, 'mouthSmileLeft', 'mouthSmileRight') < 0.25 ? 1 : 0),
+                sleepy: Math.min((s.eyeBlinkLeft || 0), (s.eyeBlinkRight || 0)) / 0.6,
+                wink: Math.max((s.eyeBlinkLeft || 0) > 0.6 && (s.eyeBlinkRight || 0) < 0.3 ? 1.2 : 0, (s.eyeBlinkRight || 0) > 0.6 && (s.eyeBlinkLeft || 0) < 0.3 ? 1.2 : 0),
+                kiss: (s.mouthPucker || 0) / 0.5,
+                disgust: avg(s, 'noseSneerLeft', 'noseSneerRight') / 0.35
+            };
+            let best = null, bv = 1;
+            for (const k in sc) { if (k === 'sleepy' && sc.wink >= 1) continue; if (sc[k] >= bv && (best === null || sc[k] > bv)) { best = k; bv = sc[k]; } }
+            return best || 'neutral';
+        }
+        window.classifyFace = classifyFace;
+
+        /* ---------------- المواقف ---------------- */
+        const SIT = [
+            ['حصلتَ على هدية جميلة في عيد ميلادك! 🎁', 'happy'], ['فاز فريقك المفضّل بالمباراة! ⚽', 'happy'], ['رأيتَ صديقك بعد غياب طويل! 🤗', 'happy'],
+            ['ضاعت لعبتك المفضّلة ولم تجدها. 🧸', 'sad'], ['سافر صديقك العزيز بعيداً عنك. ✈️', 'sad'], ['سقطت الآيس كريم على الأرض! 🍦', 'sad'],
+            ['فتحتَ الباب فرأيتَ مفاجأة كبيرة! 🎉', 'surprised'], ['سمعتَ صوتاً عالياً فجأة! 💥', 'surprised'], ['وجدتَ كنزاً في الحديقة! 💰', 'surprised'],
+            ['أخذ أحدهم لعبتك دون إذن منك! 😤', 'angry'], ['كسر أحدهم برجك الذي بنيته عمداً! 🧱', 'angry'],
+            ['حان وقت النوم بعد يوم طويل. 🌙', 'sleepy'], ['تسهر منذ ساعات والنعاس يغلبك. 🛏️', 'sleepy'],
+            ['أرسلتَ تحية لصديقك من بعيد. 💌', 'kiss'], ['شممتَ رائحة كريهة جداً! 🗑️', 'disgust'], ['تذوّقتَ طعاماً فاسداً! 🤮', 'disgust'], ['أردتَ أن تغمز لصديقك سراً. 🤫', 'wink']
+        ];
+        const LEVELS = [
+            { name: 'ابتسامة', sub: 'قلّد الوجه', limit: 40, mode: 'mimic', set: ['happy', 'surprised', 'sleepy'], lesson: 'قلّد التعبير المعروض بوجهك وثبّته ثانية.' },
+            { name: 'ثلاث مشاعر', sub: 'سعيد حزين متفاجئ', limit: 40, mode: 'mimic', set: ['happy', 'sad', 'surprised'], lesson: 'المشاعر تظهر على الوجه.' },
+            { name: 'الغضب', sub: 'أربع مشاعر', limit: 40, mode: 'mimic', set: ['happy', 'sad', 'surprised', 'angry'], lesson: 'قطّب حاجبيك للغضب.' },
+            { name: 'تعابير ظريفة', sub: 'غمزة وقبلة', limit: 40, mode: 'mimic', set: ['wink', 'kiss', 'sleepy', 'disgust', 'happy'], lesson: 'تعابير جديدة: غمزة وقبلة واستياء.' },
+            { name: 'ماذا تشعر؟', sub: 'مواقف', limit: 40, mode: 'sit', set: ['happy', 'sad', 'surprised'], lesson: 'اقرأ الموقف ثم أظهر الشعور المناسب بوجهك.' },
+            { name: 'مواقف أكثر', sub: 'غضب ونعاس', limit: 40, mode: 'sit', set: ['happy', 'sad', 'surprised', 'angry', 'sleepy'], lesson: 'مواقف جديدة ومشاعر أكثر.' },
+            { name: 'شعوران متتاليان', sub: 'ابتسم ثم تفاجأ', limit: 45, mode: 'seq', n: 2, set: ['happy', 'sad', 'surprised', 'angry', 'sleepy'], lesson: 'قلّد شعورين بالترتيب.' },
+            { name: 'ثلاثة تعابير', sub: 'تسلسل', limit: 55, mode: 'seq', n: 3, set: ['happy', 'sad', 'surprised', 'angry', 'wink', 'kiss'], lesson: 'ثلاثة تعابير بالترتيب!' },
+            { name: 'مواقف سريعة', sub: 'وقت أقل', limit: 20, mode: 'sit', set: ['happy', 'sad', 'surprised', 'angry', 'sleepy', 'kiss', 'disgust', 'wink'], lesson: 'استجب بسرعة للموقف.' },
+            { name: 'خبير المشاعر', sub: 'بلا صور', limit: 14, mode: 'mixed', set: ['happy', 'sad', 'surprised', 'angry', 'sleepy', 'wink', 'kiss', 'disgust'], lesson: 'التحدي الأخير: بلا رموز مساعدة!' }
+        ];
+        const Q_COUNT = 6, MAX_MISSES = 2, HOLD = 1.0;
+
+        function genQ(L) {
+            const mode = L.mode === 'mixed' ? EDU.pick(['mimic', 'sit', 'seq']) : L.mode;
+            const pickSit = () => { const c = SIT.filter(s => L.set.includes(s[1])); return EDU.pick(c.length ? c : SIT); };
+            if (mode === 'mimic') { const k = EDU.pick(L.set); return { text: `اجعل وجهك: ${EMO[k].n}`, seq: [k], icon: L.mode !== 'mixed' }; }
+            if (mode === 'sit') { const [t, k] = pickSit(); return { text: t, seq: [k], sit: true, ask: 'كيف تشعر؟' }; }
+            const n = L.n || 2, seq = []; while (seq.length < n) { const k = EDU.pick(L.set); if (!seq.length || seq[seq.length - 1] !== k) seq.push(k); }
+            return { text: 'قلّد بالترتيب: ' + seq.map(k => EMO[k].n).join(' ثم '), seq, icon: L.mode !== 'mixed' };
+        }
+
+        let level = 0, qi = 0, misses = 0, correct = 0, phase = 'MENU', q = null, step = 0, hold = 0;
+        let qStart = 0, phaseUntil = 0, msg = '', ok = true, flash = 0, flashC = '', lastT = performance.now(), faceOK = false, cameraOK = false;
+        let blend = null, lastFaceT = 0, emo = null, metrics = {}, chips = [];
+        let landmarker = null, lastVid = -1;
+
+        const menu = EDU.init({
+            id: 'em', title: 'مرآة المشاعر', emoji: '🎭', color: '#f472b6', bg1: '#521b3c', bg2: '#12060e',
+            levels: LEVELS, onStart: startLevel
+        });
+        function startLevel(i) { level = i; qi = 0; misses = 0; correct = 0; EDU.fx.list = []; phase = 'INTRO'; phaseUntil = performance.now() + 3000; q = null; }
+        function nextQ(now) {
+            if (qi >= Q_COUNT) return endLevel();
+            let nq = genQ(LEVELS[level]), t = 0; while (q && nq.text === q.text && t++ < 6) nq = genQ(LEVELS[level]);
+            q = nq; step = 0; hold = 0; qStart = now; phase = 'Q';
+        }
+        function endLevel() {
+            phase = 'MENU';
+            const stars = misses > MAX_MISSES ? 0 : misses === 0 ? 3 : misses === 1 ? 2 : 1;
+            menu.finish(stars, `التعبيرات الصحيحة: ${correct} من ${Q_COUNT}`, level);
+        }
+        function result(now, good, text) {
+            ok = good; msg = text; phase = 'RES'; phaseUntil = now + 1700; qi++;
+            if (good) { correct++; flash = 0.3; flashC = '244,114,182'; EDU.fx.burst(w / 2, h * 0.4, ['#f472b6', '#facc15', '#fff'], 40); [660, 880, 1100].forEach((f, k) => GC.beep(f, 0.12, 'triangle', 0.16, k * 0.08)); }
+            else { misses++; flash = 0.3; flashC = '248,113,113'; GC.beep(160, 0.3, 'sawtooth', 0.16, 0, 80); }
+        }
+        function accept(now, k) {
+            if (phase !== 'Q') return;
+            if (k === q.seq[step]) {
+                step++; hold = 0; GC.beep(700 + step * 120, 0.1, 'triangle', 0.14); EDU.fx.burst(w / 2, h * 0.45, [EMO[k].c, '#fff'], 14);
+                if (step >= q.seq.length) result(now, true, `رائع! ${EMO[k].e} ${EMO[k].n}`);
+            } else if (q.sit) result(now, false, `الشعور المناسب: ${EMO[q.seq[0]].e} ${EMO[q.seq[0]].n}`);
+        }
+
+        /* ---------------- كشف الوجه ---------------- */
+        function detect(now) {
+            if (!landmarker || video.readyState < 2 || video.currentTime === lastVid) return;
+            lastVid = video.currentTime;
+            let r; try { r = landmarker.detectForVideo(video, now); } catch (e) { return; }
+            const cats = r.faceBlendshapes && r.faceBlendshapes[0] && r.faceBlendshapes[0].categories;
+            if (cats) { blend = {}; cats.forEach(c => blend[c.categoryName] = c.score); lastFaceT = now; metrics = blend; }
+            else blend = null;
+        }
+        window.addEventListener('pointerdown', (e) => {
+            if (phase !== 'Q' || (e.target.closest && e.target.closest('button, .edu-overlay'))) return;
+            const c = chips.find(c => Math.hypot(e.clientX - c.x, e.clientY - c.y) < c.r);
+            if (c) accept(performance.now(), c.k);
+        });
+
+        function update(now, dt) {
+            if (flash > 0) flash -= dt;
+            if (faceOK) detect(now);
+            emo = blend && now - lastFaceT < 500 ? classifyFace(blend) : null;
+            if (phase === 'INTRO') { if (now >= phaseUntil) nextQ(now); return; }
+            if (phase === 'RES') { if (now >= phaseUntil) { if (misses > MAX_MISSES) endLevel(); else nextQ(now); } return; }
+            if (phase !== 'Q') return;
+            const want = q.seq[step];
+            if (emo === want) hold += dt; else hold = Math.max(0, hold - dt * 1.5);
+            if (hold >= HOLD) accept(now, want);
+            if (phase === 'Q' && (now - qStart) / 1000 >= LEVELS[level].limit) result(now, false, `انتهى الوقت — المطلوب: ${EMO[q.seq[step]].n}`);
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function draw(now, dt) {
+            GC.begin(ctx);
+            const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#3b1230'); g.addColorStop(1, '#12060e'); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+            if (phase === 'MENU' || !LEVELS[level]) return;
+            const L = LEVELS[level], fs = Math.max(13, Math.min(w * 0.038, 19));
+            ctx.fillStyle = 'rgba(18,6,14,0.9)'; ctx.fillRect(0, 0, w, 150);
+            ctx.textBaseline = 'middle'; ctx.font = `700 ${fs}px Tahoma`;
+            ctx.textAlign = 'right'; ctx.fillStyle = '#f9a8d4'; ctx.fillText(`المستوى ${level + 1}: ${L.name}`, w - 12, 18);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#e2e8f0'; ctx.fillText(`${Math.min(qi + (phase === 'Q' ? 1 : 0), Q_COUNT)} / ${Q_COUNT}`, w / 2, 18);
+            ctx.textAlign = 'left'; ctx.fillStyle = '#fca5a5'; ctx.fillText(`✖ ${misses}/${MAX_MISSES + 1}`, 118, 18);
+            if (q && (phase === 'Q' || phase === 'RES')) {
+                const sz = Math.max(16, Math.min(w * (q.text.length > 36 ? 0.04 : 0.055), 30));
+                EDU.text(ctx, q.text, w / 2, 62, sz, '#fde68a', '#9d174d');
+                if (q.ask) EDU.text(ctx, q.ask, w / 2, 98, sz * 0.8, '#f9a8d4');
+                else if (q.seq.length === 1 && !q.sit) EDU.text(ctx, EMO[q.seq[0]].hint, w / 2, 98, Math.max(13, sz * 0.62), '#e2e8f0');
+                if (phase === 'Q') { const f = Math.max(0, 1 - (now - qStart) / 1000 / L.limit); ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(12, 140, w - 24, 5); ctx.fillStyle = f < 0.3 ? '#f87171' : '#f472b6'; ctx.fillRect(12, 140, (w - 24) * f, 5); }
+                // خطوات التسلسل أو رمز الهدف
+                if (q.seq.length > 1 || q.icon) q.seq.forEach((k, i) => { const x = w / 2 + ((q.seq.length - 1) / 2 - i) * 62, c = i < step ? 1 : i === step ? 0.95 : 0.4; ctx.globalAlpha = c; ctx.font = '40px Arial'; ctx.textAlign = 'center'; ctx.fillText(L.mode === 'mixed' ? '❓' : EMO[k].e, x, 124); ctx.globalAlpha = 1; if (i < step) EDU.text(ctx, '✔', x + 20, 134, 16, '#4ade80'); });
+            }
+            // مرآة الوجه + الشخصية الحية
+            const area = { x: 10, y: 160, w: portrait ? w - 20 : w * 0.55, h: portrait ? h * 0.42 : h - 170 };
+            const vr = EDU.fitRect(video, area);
+            ctx.save(); ctx.beginPath(); ctx.roundRect(vr.x, vr.y, vr.w, vr.h, 20); ctx.clip(); ctx.fillStyle = '#000'; ctx.fillRect(vr.x, vr.y, vr.w, vr.h);
+            if (cameraOK) EDU.drawVideo(ctx, video, vr, 0.85);
+            if (!faceOK) EDU.text(ctx, 'لا يوجد كشف للوجه — اضغط الرمز المناسب بأسفل الشاشة', vr.x + vr.w / 2, vr.y + vr.h / 2, 15, '#fca5a5');
+            else if (!emo && cameraOK) EDU.text(ctx, 'ضع وجهك أمام الكاميرا', vr.x + vr.w / 2, vr.y + vr.h / 2, 18, '#fca5a5');
+            ctx.restore(); ctx.strokeStyle = 'rgba(244,114,182,0.6)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(vr.x, vr.y, vr.w, vr.h, 20); ctx.stroke();
+            const avA = portrait ? { x: w / 2, y: vr.y + vr.h + 70, r: 52 } : { x: vr.x + vr.w + (w - vr.x - vr.w) / 2, y: vr.y + 130, r: Math.min(70, (w - vr.x - vr.w) * 0.3) };
+            const showE = emo && emo !== 'neutral' ? EMO[emo] : null;
+            ctx.beginPath(); ctx.arc(avA.x, avA.y, avA.r + 12, 0, 7); ctx.fillStyle = (showE ? showE.c : '#64748b') + '44'; ctx.fill(); ctx.strokeStyle = showE ? showE.c : '#64748b'; ctx.lineWidth = 4; ctx.stroke();
+            ctx.font = `${avA.r * 1.5}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.fillText(showE ? showE.e : '😐', avA.x, avA.y + 4);
+            EDU.text(ctx, showE ? showE.n : (emo ? 'محايد' : '—'), avA.x, avA.y + avA.r + 28, 18, '#fff');
+            if (phase === 'Q' && hold > 0) { ctx.beginPath(); ctx.arc(avA.x, avA.y, avA.r + 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, hold / HOLD)); ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 7; ctx.stroke(); }
+            // مقاييس حيّة
+            if (faceOK && emo && !portrait) {
+                const rows = [['ابتسامة', avg(metrics, 'mouthSmileLeft', 'mouthSmileRight')], ['عبوس', avg(metrics, 'browDownLeft', 'browDownRight')], ['فتح الفم', metrics.jawOpen || 0], ['إغماض', avg(metrics, 'eyeBlinkLeft', 'eyeBlinkRight')]];
+                rows.forEach(([n, v], i) => { const y = avA.y + avA.r + 60 + i * 24, bw = Math.min(170, w - avA.x - 30); ctx.textAlign = 'right'; ctx.font = '12px Tahoma'; ctx.fillStyle = '#cbd5e1'; ctx.fillText(n, avA.x - bw / 2 - 6, y); ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(avA.x - bw / 2, y - 5, bw, 10); ctx.fillStyle = '#f472b6'; ctx.fillRect(avA.x - bw / 2, y - 5, bw * Math.min(1, v), 10); });
+            }
+            // رموز الاختيار (بديل اللمس)
+            chips = [];
+            if (phase === 'Q' && q) {
+                const keys = L.set, r = Math.max(22, Math.min(30, (w - 20) / keys.length / 2 - 4)), y = h - 38;
+                keys.forEach((k, i) => { const x = w / 2 + ((keys.length - 1) / 2 - i) * (r * 2 + 8); chips.push({ k, x, y, r }); ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fill(); ctx.strokeStyle = EMO[k].c; ctx.lineWidth = 2; ctx.stroke(); ctx.font = `${r * 1.2}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.fillText(EMO[k].e, x, y + 2); });
+            }
+            if (phase === 'INTRO') { ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(0, h * 0.42, w, 100); EDU.text(ctx, L.lesson, w / 2, h * 0.42 + 36, Math.max(15, Math.min(w * 0.045, 24)), '#fde047'); EDU.text(ctx, faceOK ? 'ثبّت التعبير ثانية ليُحتسب' : 'اضغط الرمز المناسب للإجابة', w / 2, h * 0.42 + 72, Math.max(12, Math.min(w * 0.032, 17)), '#e2e8f0'); }
+            if (phase === 'RES') { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, h * 0.5 - 30, w, 60); EDU.text(ctx, msg, w / 2, h * 0.5, Math.max(16, Math.min(w * 0.05, 28)), ok ? '#4ade80' : '#fca5a5'); }
+            if (flash > 0) { ctx.fillStyle = `rgba(${flashC},${Math.min(0.2, flash)})`; ctx.fillRect(0, 0, w, h); }
+            EDU.fx.draw(ctx, dt);
+        }
+        function loop(now) { const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now; update(now, dt); draw(now, dt); requestAnimationFrame(loop); }
+
+        const HELP = 'تعلّم التعرّف على المشاعر! <b>قلّد التعبير بوجهك</b> أو أظهر الشعور المناسب للموقف، والكاميرا تقرأ تعابير وجهك. ثبّت التعبير ثانية. (يحمّل نموذج الوجه عند أول تشغيل)';
+        (async function init() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { menu.ready(HELP + '<br>الكاميرا غير متاحة — اضغط الرموز.'); return; }
+            try {
+                await EDU.startRaw(video); cameraOK = true;
+                try { landmarker = await EDU.faceLandmarker(); faceOK = true; } catch (e) { console.error(e); }
+                menu.ready(faceOK ? HELP : HELP + '<br>تعذّر تحميل نموذج الوجه — استخدم الرموز على الشاشة.');
+            } catch (e) { console.error(e); menu.ready(HELP + '<br>تعذر تشغيل الكاميرا — اضغط الرموز.'); }
+        })();
+        requestAnimationFrame(loop);
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

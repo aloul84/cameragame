@@ -1,238 +1,342 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>لعبة كاميرا – ألعاب متعددة</title>
-  <meta name="description" content="مجموعة من الألعاب الصغيرة المستندة إلى HTML. اختر لعبة لتبدأ اللعب." />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>ألعاب فذ – Fath Play</title>
+  <meta name="theme-color" content="#0a1424" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800;900&display=swap" rel="stylesheet" />
   <style>
-    :root {
-      --bg-primary: #1b3156;
-      --bg-secondary: #1ca08c;
-      --bg-deep: #0d2038;
-      --card-bg: #1b3156;
-      --card-edge: rgba(255,255,255,0.18);
-      --text-primary: #f5fbff;
-      --text-soft: #d9f4ef;
-      --shadow: rgba(4, 15, 26, 0.45);
-      --glow: rgba(26, 218, 179, 0.55);
-    }
+    @property --accent { syntax: '<color>'; inherits: true; initial-value: #2ee6c5; }
 
-    * {
-      box-sizing: border-box;
-    }
-
-    html, body {
-      margin: 0;
-      min-height: 100%;
-      font-family: 'Inter', sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(255,255,255,0.08), transparent 25%),
-        radial-gradient(circle at bottom right, rgba(28,160,140,0.4), transparent 30%),
-        linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
-      color: var(--text-primary);
-    }
+    :root { --accent: #2ee6c5; --card-w: 260px; --card-h: 340px; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
 
     body {
-      min-height: 100vh;
+      font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+      color: #f5fbff;
+      background:
+        radial-gradient(900px 520px at 50% 58%, color-mix(in srgb, var(--accent) 34%, transparent), transparent 70%),
+        radial-gradient(700px 400px at 10% 0%, rgba(99, 102, 241, 0.22), transparent 70%),
+        linear-gradient(180deg, #101e38 0%, #070d1a 100%);
+      transition: --accent 0.7s ease;
       display: flex;
       flex-direction: column;
-      overflow-x: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: pan-y;
     }
+    #fx { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
 
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      background: linear-gradient(120deg, rgba(255,255,255,0.06), transparent 35%, rgba(255,255,255,0.04));
-      pointer-events: none;
-    }
-
+    /* ---------- الرأس ---------- */
     header {
-      text-align: center;
-      padding: 2.2rem 1rem 1rem;
-      position: relative;
-      z-index: 1;
+      position: relative; z-index: 3; display: flex; align-items: center; justify-content: space-between;
+      padding: calc(14px + env(safe-area-inset-top)) clamp(14px, 4vw, 40px) 0;
+      animation: fadeDown 0.8s ease both;
     }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand img { width: clamp(44px, 9vw, 64px); height: auto; filter: drop-shadow(0 6px 14px rgba(0,0,0,0.4)); }
+    .brand h1 { margin: 0; font-size: clamp(1.15rem, 3.4vw, 1.7rem); font-weight: 900; line-height: 1.1; }
+    .brand h1 small { display: block; font-size: 0.55em; font-weight: 600; color: #9fb4c8; letter-spacing: 0.08em; }
+    .counter { font-weight: 800; font-size: clamp(1rem, 3vw, 1.4rem); color: var(--accent); transition: color 0.7s; direction: ltr; }
+    .counter span { color: #7b8ba3; font-weight: 600; }
 
-    .brand-wrap {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      margin-bottom: 1rem;
+    /* ---------- المسرح ---------- */
+    .stage {
+      position: relative; z-index: 2; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+      perspective: 1400px; perspective-origin: 50% 40%; cursor: grab;
     }
-
-    .brand-logo {
-      width: 150px;
-      height: auto;
-      display: block;
-      filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.22));
-    }
-
-    h1 {
-      margin: 0;
-      font-size: clamp(2.1rem, 2.5vw, 3.6rem);
-      font-weight: 900;
-      letter-spacing: 0.02em;
-      color: #ffffff;
-      text-shadow: 0 10px 25px rgba(0,0,0,0.18);
-    }
-
-    .subtitle {
-      margin: 0.9rem 0 0;
-      font-size: 1.15rem;
-      color: var(--text-soft);
-      letter-spacing: 0.04em;
-      font-weight: 600;
-    }
-
-    .grid {
-      position: relative;
-      z-index: 1;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
-      gap: 1.4rem;
-      width: min(1220px, calc(100% - 2rem));
-      margin: 0 auto;
-      padding: 1.5rem 0 1rem;
-    }
+    .stage.dragging { cursor: grabbing; }
+    .track { position: relative; width: var(--card-w); height: var(--card-h); transform-style: preserve-3d; }
 
     .card {
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      min-height: 164px;
-      padding: 1.4rem 1rem;
-      border-radius: 1.5rem;
-      text-decoration: none;
-      color: inherit;
-      background: linear-gradient(180deg, rgba(27,49,86,0.9), rgba(17,33,59,0.9));
-      border: 1px solid var(--card-edge);
-      box-shadow: 0 12px 28px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.08);
-      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, filter 0.18s ease;
+      --c: #2ee6c5;
+      position: absolute; inset: 0; border-radius: 28px; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+      padding: 22px 18px 20px;
+      background:
+        radial-gradient(160px 160px at 50% 28%, color-mix(in srgb, var(--c) 45%, transparent), transparent 70%),
+        linear-gradient(165deg, rgba(255,255,255,0.14), rgba(255,255,255,0.04));
+      border: 1px solid rgba(255,255,255,0.18);
+      box-shadow: 0 24px 50px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.25);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      transition: transform 0.7s cubic-bezier(.2,.9,.25,1.12), opacity 0.5s ease, filter 0.5s ease, box-shadow 0.5s ease;
+      will-change: transform, opacity;
       overflow: hidden;
-      isolation: isolate;
     }
+    .card .num { align-self: flex-start; font-weight: 900; font-size: 0.95rem; color: rgba(255,255,255,0.35); direction: ltr; }
+    .card .icon-wrap { position: relative; display: grid; place-items: center; width: 150px; height: 150px; }
+    .card .icon-wrap::before {
+      content: ""; position: absolute; inset: 8px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--c) 70%, #fff 20%), color-mix(in srgb, var(--c) 40%, #0a1424));
+      box-shadow: 0 14px 34px color-mix(in srgb, var(--c) 55%, transparent), inset 0 -8px 18px rgba(0,0,0,0.25);
+    }
+    .card .icon { position: relative; font-size: 4.6rem; line-height: 1; filter: drop-shadow(0 8px 10px rgba(0,0,0,0.35)); }
+    .card .name { font-size: 1.35rem; font-weight: 900; text-align: center; line-height: 1.3; text-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+    .card .tag { margin-top: 6px; padding: 3px 12px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; background: color-mix(in srgb, var(--c) 28%, transparent); border: 1px solid color-mix(in srgb, var(--c) 60%, transparent); color: #fff; }
+    .card .bottom { display: flex; flex-direction: column; align-items: center; }
 
-    .card::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(135deg, rgba(255,255,255,0.08), transparent 42%, rgba(28,160,140,0.18));
-      z-index: -1;
+    /* لمعة تعبر البطاقة المختارة */
+    .card::after {
+      content: ""; position: absolute; top: -20%; bottom: -20%; width: 40%; left: -60%; opacity: 0;
+      background: linear-gradient(100deg, transparent, rgba(255,255,255,0.35), transparent); transform: skewX(-20deg); pointer-events: none;
     }
+    .card.active { border-color: color-mix(in srgb, var(--c) 80%, #fff 10%); box-shadow: 0 30px 70px rgba(0,0,0,0.55), 0 0 0 2px color-mix(in srgb, var(--c) 70%, transparent), 0 0 60px color-mix(in srgb, var(--c) 55%, transparent), inset 0 1px 0 rgba(255,255,255,0.3); }
+    .card.active::after { opacity: 1; animation: shine 3.4s ease-in-out infinite 0.6s; }
+    .card.active .icon { animation: bob 2.6s ease-in-out infinite; }
+    .card.active .icon-wrap::after {
+      content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px dashed color-mix(in srgb, var(--c) 80%, #fff);
+      opacity: 0.7; animation: spin 14s linear infinite;
+    }
+    .badge {
+      position: absolute; top: 14px; left: 14px; padding: 3px 12px; border-radius: 999px; font-size: 0.72rem; font-weight: 800;
+      background: var(--c); color: #04141a; opacity: 0; transform: translateY(-6px); transition: all 0.5s 0.15s;
+    }
+    .card.active .badge { opacity: 1; transform: none; }
+    .card.launching { transition: transform 0.55s cubic-bezier(.5,0,.2,1), opacity 0.55s ease !important; transform: translateZ(300px) scale(2.4) !important; opacity: 0 !important; }
 
-    .card:hover,
-    .card:focus-visible {
-      transform: translateY(-6px) scale(1.015);
-      box-shadow: 0 18px 38px rgba(0,0,0,0.28), 0 0 0 2px rgba(255,255,255,0.08), 0 0 18px var(--glow);
-      border-color: rgba(255,255,255,0.28);
-      filter: brightness(1.04);
+    /* ---------- التذييل: اسم اللعبة وزر التشغيل ---------- */
+    .info { position: relative; z-index: 3; text-align: center; padding: 0 16px calc(18px + env(safe-area-inset-bottom)); }
+    #selTitle { font-size: clamp(1.5rem, 5vw, 2.6rem); font-weight: 900; margin: 0; min-height: 1.3em; text-shadow: 0 4px 24px color-mix(in srgb, var(--accent) 60%, transparent); }
+    #selTitle.swap { animation: titleIn 0.5s ease both; }
+    .play {
+      margin: 10px auto 0; display: inline-flex; align-items: center; gap: 10px; padding: 12px clamp(30px, 8vw, 54px); border: none; border-radius: 999px; cursor: pointer;
+      font-family: inherit; font-size: clamp(1.05rem, 3.5vw, 1.35rem); font-weight: 900; color: #04141a;
+      background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #fff));
+      transition: transform 0.2s ease; animation: pulse 2.2s ease-in-out infinite;
     }
+    .play:hover { transform: translateY(-2px) scale(1.04); }
+    .play:active { transform: scale(0.97); }
+    .dots { display: flex; justify-content: center; gap: 6px; margin: 14px auto 0; flex-wrap: wrap; max-width: 520px; }
+    .dots i { width: 7px; height: 7px; border-radius: 999px; background: rgba(255,255,255,0.25); transition: all 0.4s ease; cursor: pointer; }
+    .dots i.on { width: 26px; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+    .hint { margin-top: 8px; font-size: 0.8rem; color: #7b8ba3; }
 
-    .icon {
-      font-size: 3.1rem;
-      line-height: 1;
-      margin-bottom: 0.85rem;
-      filter: drop-shadow(0 5px 12px rgba(0,0,0,0.18));
+    .nav {
+      position: absolute; z-index: 4; top: 50%; transform: translateY(-60%); width: 52px; height: 52px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.25); background: rgba(10,20,36,0.55); color: #fff; font-size: 1.5rem; cursor: pointer;
+      backdrop-filter: blur(6px); transition: all 0.25s ease; display: grid; place-items: center; font-family: inherit;
     }
+    .nav:hover { background: var(--accent); color: #04141a; transform: translateY(-60%) scale(1.1); }
+    .nav.prev { right: clamp(8px, 3vw, 40px); } .nav.next { left: clamp(8px, 3vw, 40px); }
 
-    .title {
-      font-size: 1rem;
-      font-weight: 800;
-      line-height: 1.5;
-      color: var(--text-primary);
-      text-align: center;
-    }
+    @keyframes bob { 0%,100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-10px) rotate(3deg); } }
+    @keyframes shine { 0% { left: -60%; } 55%,100% { left: 130%; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%,100% { box-shadow: 0 10px 30px color-mix(in srgb, var(--accent) 55%, transparent); } 50% { box-shadow: 0 10px 44px color-mix(in srgb, var(--accent) 85%, transparent); } }
+    @keyframes titleIn { from { opacity: 0; transform: translateY(14px); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+    @keyframes fadeDown { from { opacity: 0; transform: translateY(-16px); } to { opacity: 1; transform: none; } }
+    @keyframes cardIn { from { opacity: 0; margin-left: -300px; } }
+    .intro .card { animation: cardIn 0.9s cubic-bezier(.2,.9,.25,1.1) both; }
+    body.leaving { animation: leave 0.55s ease forwards; }
+    @keyframes leave { to { opacity: 0; filter: blur(10px); } }
 
-    .footer-link {
-      position: relative;
-      z-index: 1;
-      margin-top: auto;
-      text-align: center;
-      padding: 1.2rem 1rem 2rem;
-      user-select: none;
-      pointer-events: none;
+    @media (max-width: 640px) {
+      :root { --card-w: min(72vw, 250px); --card-h: min(46vh, 330px); }
+      .nav { width: 42px; height: 42px; font-size: 1.2rem; }
+      .card .icon-wrap { width: 120px; height: 120px; } .card .icon { font-size: 3.6rem; }
+      .card .name { font-size: 1.15rem; } .hint { display: none; }
     }
-
-    .footer-link span {
-      color: #edfef9;
-      text-decoration: none;
-      font-weight: 700;
-      opacity: 0.95;
-      transition: opacity 0.2s ease;
-      cursor: default;
-    }
-
-    @media (max-width: 700px) {
-      .grid {
-        grid-template-columns: repeat(2, minmax(140px, 1fr));
-      }
-    }
+    @media (max-height: 560px) { :root { --card-h: 270px; --card-w: 210px; } .card .icon-wrap { width: 100px; height: 100px; } .card .icon { font-size: 3rem; } .dots, .hint { display: none; } }
+    /* تعطيل إطار التركيز الأصفر الخاص بـ remote-nav في هذه الصفحة (التنقل بالأسهم يتم داخلياً) */
+    body .remote-focus { outline: none !important; box-shadow: none !important; transform: none; }
+    body .play.remote-focus { box-shadow: 0 10px 36px color-mix(in srgb, var(--accent) 70%, transparent) !important; }
+    body .nav.remote-focus { transform: translateY(-60%); }
+    #remote-back-btn { display: none !important; }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition-duration: 0.01s !important; } }
   </style>
 </head>
 <body>
+  <canvas id="fx"></canvas>
+
   <header>
-    <div class="brand-wrap">
-      <img class="brand-logo" src="fath-logo-white.png" alt="Fath logo" />
+    <div class="brand">
+      <img src="fath-logo-white.png" alt="شعار فذ" />
+      <h1>ألعاب فذ<small>FATH PLAY</small></h1>
     </div>
-    <h1>Fath play - ألعاب فذ</h1>
-    <p class="subtitle">اختر لعبة</p>
+    <div class="counter" id="counter"></div>
   </header>
-  <section class="grid">
-    <a class="card" href="arabic-letters.html">
-      <div class="icon">🅰️</div>
-      <div class="title">حروف عربية</div>
-    </a>
-    <a class="card" href="english-letter.html">
-      <div class="icon">🇬🇧</div>
-      <div class="title">الحروف الإنجليزية</div>
-    </a>
-    <a class="card" href="finger-jump.html">
-      <div class="icon">🤚</div>
-      <div class="title">قفزة الإصبع</div>
-    </a>
-    <a class="card" href="head-jump.html">
-      <div class="icon">🤸‍♀️</div>
-      <div class="title">قفزة الرأس</div>
-    </a>
-    <a class="card" href="hoky-2-players.html">
-      <div class="icon">⚽️</div>
-      <div class="title">هوكي لاعبان</div>
-    </a>
-    <a class="card" href="hoky-vs-cpu.html">
-      <div class="icon">🤖⚽️</div>
-      <div class="title">هوكي ضد الحاسوب</div>
-    </a>
-    <a class="card" href="hoky-vs-cpu-small-goal.html">
-      <div class="icon">🥅⚽️</div>
-      <div class="title">هوكي هدف صغير</div>
-    </a>
-    <a class="card" href="maze.html">
-      <div class="icon">🧩</div>
-      <div class="title">المتاهة</div>
-    </a>
-    <a class="card" href="race.html">
-      <div class="icon">🏁</div>
-      <div class="title">سباق</div>
-    </a>
-    <a class="card" href="race-with-sound.html">
-      <div class="icon">🔊🏁</div>
-      <div class="title">سباق مع الصوت</div>
-    </a>
-    <a class="card" href="twins-simulator.html">
-      <div class="icon">👯‍♂️</div>
-      <div class="title">محاكي التوأم</div>
-    </a>
+
+  <main class="stage intro" id="stage" aria-label="قائمة الألعاب">
+    <button class="nav prev" id="prev" aria-label="السابق">›</button>
+    <div class="track" id="track"></div>
+    <button class="nav next" id="next" aria-label="التالي">‹</button>
+  </main>
+
+  <section class="info">
+    <h2 id="selTitle"></h2>
+    <button class="play" id="play">▶ العب الآن</button>
+    <div class="dots" id="dots"></div>
+    <div class="hint">استخدم الأسهم ◂ ▸ أو اسحب أو مرّر العجلة — Enter للتشغيل</div>
   </section>
 
-  <div class="footer-link">
-    <span>fath-app.com</span>
-  </div>
+  <script>
+    (function () {
+      var GAMES = [
+        ['arabic-letters.html', '🅰️', 'حروف عربية', 'تعليمي', '#4cc9f0'],
+        ['word-builder.html', '🔤', 'بنّاء الكلمات', 'تعليمي', '#38bdf8'],
+        ['balance-duel.html', '⚖️', 'ميزان التحدي', 'لاعبان', '#fbbf24'],
+        ['body-race.html', '🏃', 'سباق الأجسام', 'لاعبان', '#34d399'],
+        ['finger-math.html', '🖐️', 'حاسب الأصابع', 'رياضيات', '#60a5fa'],
+        ['science-sorter.html', '🔬', 'مصنّف العلوم', 'علوم', '#4ade80'],
+        ['body-clock.html', '🕒', 'ساعة الجسم', 'الوقت', '#c084fc'],
+        ['color-hunt.html', '🎨', 'صائد الألوان', 'فنون', '#f472b6'],
+        ['melody-hands.html', '🎵', 'عازف الألحان', 'موسيقى', '#fbbf24'],
+        ['air-draw.html', '✍️', 'رسّام الهواء', 'هندسة', '#38bdf8'],
+        ['treasure-compass.html', '🧭', 'كنز الاتجاهات', 'جغرافيا', '#f59e0b'],
+        ['simon-says.html', '🕴️', 'سايمون يقول', 'إنجليزي', '#a78bfa'],
+        ['light-lab.html', '💡', 'مختبر الضوء', 'علوم', '#fde047'],
+        ['move-math.html', '🧮', 'حساب بالحركة', 'رياضيات', '#2dd4bf'],
+        ['connect-dots.html', '🔢', 'وصّل النقاط', 'تعليمي', '#818cf8'],
+        ['emotion-mirror.html', '🎭', 'مرآة المشاعر', 'مشاعر', '#fb7185'],
+        ['hoky-vs-cpu-small-goal.html', '🥅', 'هوكي هدف صغير', 'رياضة', '#f87171'],
+        ['maze.html', '🧩', 'المتاهة', '٧٤ مستوى', '#a78bfa'],
+        ['race-with-sound.html', '🏎️', 'سباق مع الصوت', 'سباق', '#fb923c'],
+        ['twins-simulator.html', '👯‍♂️', 'محاكي التوأم', 'استوديو', '#22d3ee']
+      ];
+      var NEW = { 'treasure-compass.html': 1, 'simon-says.html': 1, 'light-lab.html': 1, 'move-math.html': 1, 'connect-dots.html': 1, 'emotion-mirror.html': 1 };
+      var toAr = function (n) { return String(n).replace(/\d/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'[d]; }); };
+      var track = document.getElementById('track'), stage = document.getElementById('stage');
+      var selTitle = document.getElementById('selTitle'), counter = document.getElementById('counter'), dotsEl = document.getElementById('dots');
+      var cards = [], active = 0, launching = false, startX = null, moved = false, baseActive = 0, prevD = [];
+      var N = GAMES.length, mod = function (x) { return ((x % N) + N) % N; };
+      // آخر لعبة دخلت عليها (أول زيارة: اللعبة الأولى)
+      try { var last = parseInt(localStorage.getItem('fath_last'), 10); if (last >= 0 && last < N) active = last; } catch (e) { }
 
+      GAMES.forEach(function (g, i) {
+        var c = document.createElement('div');
+        c.className = 'card'; c.setAttribute('role', 'button'); c.setAttribute('aria-label', g[2]);
+        c.style.setProperty('--c', g[4]);
+        c.style.animationDelay = (i * 0.05) + 's';
+        c.innerHTML = '<span class="num">' + String(i + 1).padStart(2, '0') + '</span>' +
+          (NEW[g[0]] ? '<span class="badge">جديدة</span>' : '') +
+          '<div class="icon-wrap"><div class="icon">' + g[1] + '</div></div>' +
+          '<div class="bottom"><div class="name">' + g[2] + '</div><div class="tag">' + g[3] + '</div></div>';
+        c.addEventListener('click', function () { if (moved) return; if (i === active) open(); else go(i); });
+        track.appendChild(c); cards.push(c);
+        var d = document.createElement('i'); d.addEventListener('click', function () { go(i); }); dotsEl.appendChild(d);
+      });
+      var dots = dotsEl.children;
+
+      // صوت خفيف عند التنقل
+      var ac = null;
+      function tick(f) {
+        try {
+          var A = window.AudioContext || window.webkitAudioContext; if (!A) return; ac = ac || new A(); if (ac.state === 'suspended') ac.resume();
+          var o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+          o.type = 'triangle'; o.frequency.setValueAtTime(f || 520, t); o.frequency.exponentialRampToValueAtTime((f || 520) * 0.6, t + 0.09);
+          g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.07, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+          o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + 0.13);
+        } catch (e) { }
+      }
+
+      // البطاقات اللاحقة إلى اليسار (واجهة عربية)، السابقة إلى اليمين
+      function layout() {
+        var cw = cards[0].offsetWidth || 260, step = Math.max(cw * 0.58, 120);
+        cards.forEach(function (c, i) {
+          var d = mod(i - active + N / 2) - N / 2, ad = Math.abs(d);
+          // عند اللفّ من طرف القائمة للطرف الآخر نوقف الانتقال لحظياً حتى لا تعبر البطاقة الشاشة
+          var wrapped = prevD[i] !== undefined && Math.abs(d - prevD[i]) > N / 2; prevD[i] = d;
+          if (wrapped) { c.style.transition = 'none'; void c.offsetWidth; requestAnimationFrame(function () { c.style.transition = ''; }); }
+          if (ad > 4) { c.style.opacity = 0; c.style.pointerEvents = 'none'; c.style.transform = 'translateX(' + (-d * step) + 'px) scale(0.5)'; c.classList.remove('active'); return; }
+          c.style.pointerEvents = 'auto';
+          var rot = Math.max(-2, Math.min(2, d)) * 30, scale = ad === 0 ? 1.06 : Math.max(0.55, 1 - ad * 0.14);
+          c.style.transform = 'translateX(' + (-d * step) + 'px) translateZ(' + (ad === 0 ? 70 : -ad * 70) + 'px) rotateY(' + rot + 'deg) scale(' + scale + ')';
+          c.style.opacity = ad === 0 ? 1 : Math.max(0.15, 1 - ad * 0.2);
+          c.style.filter = ad === 0 ? 'none' : 'saturate(' + Math.max(0.5, 1 - ad * 0.2) + ') brightness(' + Math.max(0.55, 1 - ad * 0.14) + ')';
+          c.style.zIndex = 10 - ad;
+          c.classList.toggle('active', ad === 0);
+        });
+        for (var k = 0; k < dots.length; k++) dots[k].classList.toggle('on', k === active);
+        document.documentElement.style.setProperty('--accent', GAMES[active][4]);
+        counter.innerHTML = toAr(active + 1) + ' <span>/ ' + toAr(GAMES.length) + '</span>';
+        if (selTitle.textContent !== GAMES[active][2]) {
+          selTitle.textContent = GAMES[active][2]; selTitle.classList.remove('swap'); void selTitle.offsetWidth; selTitle.classList.add('swap');
+        }
+      }
+      function go(i) {
+        i = mod(i);
+        if (i === active) return;
+        active = i; tick(440 + (i % 8) * 70); layout();
+      }
+      function open() {
+        if (launching) return; launching = true; tick(880);
+        try { localStorage.setItem('fath_last', active); } catch (e) { }
+        cards[active].classList.add('launching'); document.body.classList.add('leaving');
+        setTimeout(function () { window.location.href = GAMES[active][0]; }, 520);
+      }
+
+      document.getElementById('prev').addEventListener('click', function () { go(active - 1); });
+      document.getElementById('next').addEventListener('click', function () { go(active + 1); });
+      document.getElementById('play').addEventListener('click', open);
+
+      // لوحة المفاتيح: السهم الأيسر = التالي (يسار)، الأيمن = السابق
+      window.addEventListener('keydown', function (e) {
+        var k = e.key, handled = true;
+        if (k === 'ArrowLeft') go(active + 1);
+        else if (k === 'ArrowRight') go(active - 1);
+        else if (k === 'Enter' || k === ' ') open();
+        else handled = false;
+        if (handled) { e.preventDefault(); e.stopPropagation(); }
+      }, true);
+
+      // عجلة الفأرة
+      var wheelLock = 0;
+      stage.addEventListener('wheel', function (e) {
+        var now = Date.now(); if (now - wheelLock < 220) return;
+        var d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+        if (Math.abs(d) < 8) return; wheelLock = now; go(active + (d > 0 ? 1 : -1));
+        e.preventDefault();
+      }, { passive: false });
+
+      // السحب (فأرة أو لمس): السحب لليسار = التالي
+      stage.addEventListener('pointerdown', function (e) { if (e.target.closest('.nav')) return; startX = e.clientX; moved = false; baseActive = active; stage.classList.add('dragging'); });
+      window.addEventListener('pointermove', function (e) {
+        if (startX === null) return;
+        var dx = e.clientX - startX, unit = Math.max(70, (cards[0].offsetWidth || 260) * 0.5);
+        if (Math.abs(dx) > 8) moved = true;
+        go(baseActive + Math.round(-dx / unit));
+      });
+      function endDrag() { startX = null; stage.classList.remove('dragging'); setTimeout(function () { moved = false; }, 30); }
+      window.addEventListener('pointerup', endDrag); window.addEventListener('pointercancel', endDrag);
+
+      // ميلان ثلاثي الأبعاد خفيف مع الفأرة
+      track.style.transition = 'transform 0.4s ease';
+      stage.addEventListener('mousemove', function (e) {
+        if (launching || startX !== null) return;
+        var r = stage.getBoundingClientRect(), nx = (e.clientX - r.left) / r.width - 0.5, ny = (e.clientY - r.top) / r.height - 0.5;
+        track.style.transform = 'rotateY(' + (nx * 8) + 'deg) rotateX(' + (-ny * 6) + 'deg)';
+      });
+      stage.addEventListener('mouseleave', function () { track.style.transform = ''; });
+
+      window.addEventListener('resize', layout);
+      layout();
+      setTimeout(function () { stage.classList.remove('intro'); }, 1800);
+
+      /* ---------- جسيمات الخلفية ---------- */
+      var cv = document.getElementById('fx'), cx = cv.getContext('2d'), P = [], W = 0, H = 0;
+      function rs() { W = cv.width = innerWidth; H = cv.height = innerHeight; }
+      rs(); window.addEventListener('resize', rs);
+      for (var n = 0; n < 46; n++) P.push({ x: Math.random(), y: Math.random(), r: 0.8 + Math.random() * 2.4, s: 0.02 + Math.random() * 0.06, p: Math.random() * 6 });
+      var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      function frame(t) {
+        cx.clearRect(0, 0, W, H);
+        var col = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#2ee6c5';
+        P.forEach(function (q) {
+          q.y -= q.s * 0.002; if (q.y < -0.02) { q.y = 1.02; q.x = Math.random(); }
+          var x = (q.x + Math.sin(t / 2500 + q.p) * 0.012) * W, y = q.y * H;
+          cx.globalAlpha = 0.25 + 0.35 * Math.abs(Math.sin(t / 1200 + q.p)); cx.fillStyle = col;
+          cx.beginPath(); cx.arc(x, y, q.r, 0, 7); cx.fill();
+        });
+        cx.globalAlpha = 1;
+        if (!reduce) requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    })();
+  </script>
   <script src="remote-nav.js"></script>
 </body>
 </html>

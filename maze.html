@@ -102,11 +102,13 @@
         }
         button:hover, button:active { background-color: #66fcf1; color: #0b0c10; box-shadow: 0 0 25px rgba(102, 252, 241, 0.8); }
 
-        #levelPicker { display: flex; gap: 10px; margin: 0 0 18px; flex-wrap: wrap; justify-content: center; }
+        #chapterPicker { display: flex; gap: 6px; margin: 0 0 10px; flex-wrap: wrap; justify-content: center; max-width: 640px; }
+        .lvl.chap { min-width: 0; font-size: 0.9rem; padding: 4px 12px; border-radius: 20px; }
+        #levelPicker { display: flex; gap: 8px; margin: 0 0 18px; flex-wrap: wrap; justify-content: center; max-width: 640px; }
         .lvl {
-            padding: 8px 14px;
-            min-width: 76px;
-            font-size: 1.3rem;
+            padding: 6px 10px;
+            min-width: 64px;
+            font-size: 1.15rem;
             background: #1f2833;
             border-radius: 14px;
             line-height: 1.3;
@@ -133,6 +135,7 @@
             h1 { margin-bottom: 4px; }
             p { margin-bottom: 8px; }
             #levelPicker { margin-bottom: 10px; }
+            #chapterPicker { margin-bottom: 6px; }
             .lvl { padding: 4px 10px; font-size: 1.1rem; }
             button { padding: 8px 28px; }
             #cameraContainer { width: 64px; height: 48px; }
@@ -153,6 +156,7 @@
         <div id="loader" class="loader"></div>
         <h1 id="uiTitle">جاري تحضير لعبة المتاهة...</h1>
         <p id="uiDesc">ننتظر موافقتك لتشغيل الكاميرا وتحليل كف اليد.</p>
+        <div id="chapterPicker"></div>
         <div id="levelPicker"></div>
         <button id="startBtn" class="hidden">ابدأ التحدي</button>
     </div>
@@ -167,6 +171,7 @@
         const loader = document.getElementById('loader');
         const startBtn = document.getElementById('startBtn');
         const levelPicker = document.getElementById('levelPicker');
+        const chapterPicker = document.getElementById('chapterPicker');
         const hudLevel = document.getElementById('hudLevel');
         const hudTime = document.getElementById('hudTime');
         const hudLives = document.getElementById('hudLives');
@@ -181,16 +186,116 @@
             { name: 'مبتدئ',  cells: [5, 3],  seed: 11, braid: 0.45, time: 90,  wall: '#1f2833', line: '#45a29e', accent: '#66fcf1' },
             { name: 'متوسط',  cells: [7, 4],  seed: 23, braid: 0.22, time: 100, wall: '#1d2b3a', line: '#4f9ad6', accent: '#7cc4ff' },
             { name: 'صعب',    cells: [9, 5],  seed: 37, braid: 0.08, time: 120, wall: '#2e2433', line: '#b36bd6', accent: '#e0a3ff' },
-            { name: 'ظلام',   cells: [11, 6], seed: 41, braid: 0,    time: 150, wall: '#2b2418', line: '#e0a030', accent: '#ffd36b', dark: true }
+            { name: 'ظلام',   cells: [11, 6], seed: 41, braid: 0,    time: 150, wall: '#2b2418', line: '#e0a030', accent: '#ffd36b', dark: 1 },
+            { name: 'ماهر',   cells: [12, 7], seed: 52, braid: 0.05, time: 150, wall: '#1f3326', line: '#4caf6e', accent: '#8dffae' },
+            { name: 'متاهة كبيرة', cells: [13, 7], seed: 63, braid: 0, time: 160, wall: '#331f1f', line: '#e5584f', accent: '#ff9c94' },
+            { name: 'ضباب',   cells: [10, 6], seed: 74, braid: 0.03, time: 150, wall: '#1d2b3a', line: '#4f9ad6', accent: '#7cc4ff', dark: 1.3 },
+            { name: 'سريع',   cells: [9, 5],  seed: 85, braid: 0.1,  time: 55,  wall: '#33301a', line: '#d9c534', accent: '#fff17a' },
+            { name: 'متشعب',  cells: [14, 8], seed: 96, braid: 0.02, time: 190, wall: '#2e2433', line: '#b36bd6', accent: '#e0a3ff' },
+            { name: 'ظلام 2', cells: [11, 6], seed: 107, braid: 0,   time: 150, wall: '#1a2a2a', line: '#2fbfb0', accent: '#7ffff0', dark: 0.8 },
+            { name: 'عملاق',  cells: [15, 8], seed: 118, braid: 0,   time: 200, wall: '#2b2418', line: '#e0a030', accent: '#ffd36b' },
+            { name: 'ضباب 2', cells: [12, 7], seed: 129, braid: 0,   time: 180, wall: '#331f2e', line: '#e05fa8', accent: '#ffa3d6', dark: 1 },
+            { name: 'خبير',   cells: [16, 9], seed: 140, braid: 0,   time: 240, wall: '#1f2833', line: '#66fcf1', accent: '#ffffff', dark: 1.4 },
+            { name: 'الأسطورة', cells: [17, 9], seed: 151, braid: 0, time: 220, wall: '#2a1a1a', line: '#ff4d4d', accent: '#ffd700', dark: 0.9 },
+            // ---- مستويات بأفكار جديدة ----
+            { name: 'النجوم',  cells: [7, 4],  seed: 161, braid: 0.15, time: 110, wall: '#33301a', line: '#f1c40f', accent: '#fff17a', stars: 4, hint: 'اجمع كل النجوم ⭐ ثم اذهب للنهاية' },
+            { name: 'المفتاح', cells: [8, 5],  seed: 172, braid: 0,    time: 130, wall: '#1f2833', line: '#5dade2', accent: '#aed6f1', key: true, hint: 'خذ المفتاح 🔑 لفتح الباب 🔒' },
+            { name: 'البوابات', cells: [9, 5], seed: 183, braid: 0,    time: 140, wall: '#2b1f33', line: '#af7ac5', accent: '#e8daef', gates: 3, hint: 'البوابات تفتح وتغلق — انتظر اللحظة المناسبة' },
+            { name: 'الانتقال', cells: [11, 6], seed: 194, braid: 0,   time: 130, wall: '#14303a', line: '#1abc9c', accent: '#a3e4d7', portals: 2, hint: 'ادخل الدائرة المتوهجة للانتقال إلى توأمها' },
+            { name: 'المعكوس', cells: [7, 4],  seed: 205, braid: 0.1,  time: 120, wall: '#331f2e', line: '#ec7063', accent: '#f5b7b1', invert: true, hint: 'الحركة الأفقية معكوسة: يمينك صار يساراً!' },
+            { name: 'الحارس',  cells: [8, 5],  seed: 216, braid: 0.15, time: 140, wall: '#1f3326', line: '#58d68d', accent: '#abebc6', enemies: 1, hint: 'تجنّب الحارس 👾 وإلا خسرت محاولة' },
+            { name: 'الثقيلة', cells: [9, 5],  seed: 227, braid: 0.05, time: 150, wall: '#2e2a24', line: '#b9a07a', accent: '#f0e0c0', heavy: true, stars: 3, hint: 'الكرة ثقيلة وبطيئة الاستجابة — تحرّك بهدوء' },
+            { name: 'الذاكرة', cells: [10, 6], seed: 238, braid: 0,    time: 150, wall: '#1d2b3a', line: '#5499c7', accent: '#d6eaf8', memory: true, hint: 'احفظ الطريق: تختفي الجدران بعد 4 ثوانٍ' },
+            { name: 'الحراس',  cells: [9, 5],  seed: 249, braid: 0.1,  time: 160, wall: '#331f1f', line: '#e74c3c', accent: '#fadbd8', enemies: 2, stars: 3, hint: 'حارسان ونجوم! اجمعها دون أن يلمسك أحد' },
+            { name: 'التحدي الأخير', cells: [11, 6], seed: 260, braid: 0, time: 240, wall: '#1a1a2e', line: '#f39c12', accent: '#ffffff', key: true, gates: 2, enemies: 1, stars: 2, dark: 1.2, hint: 'كل الأفكار معاً! بالتوفيق' }
         ];
+
+        /* ---------------- 50 مستوى جديد بأفكار جديدة (الفصول 3 إلى 7) ----------------
+           ice: انزلاق | mud: طين يبطئ | wind: رياح تدفع على المسار | lag: تأخير الاستجابة (ms) | ball: حجم الكرة
+           ctrl: mx/my/mxy/swap/rot تحكم غريب | enemies: ['patrol'|'chase'|'sentry'] | shield / clocks / mines
+           orbs: كرات مرقمة بالترتيب | locks: أقفال ['key'|'switch'] | ghost: جدران وهمية | flicker / shrink: رؤية متقطعة / تضيق */
+        const PALETTES = [
+            ['#1f2833', '#45a29e', '#66fcf1'], ['#1d2b3a', '#4f9ad6', '#7cc4ff'], ['#2e2433', '#b36bd6', '#e0a3ff'],
+            ['#2b2418', '#e0a030', '#ffd36b'], ['#1f3326', '#4caf6e', '#8dffae'], ['#331f1f', '#e5584f', '#ff9c94'],
+            ['#33301a', '#d9c534', '#fff17a'], ['#14303a', '#1abc9c', '#a3e4d7'], ['#331f2e', '#e05fa8', '#ffa3d6'],
+            ['#2e2a24', '#b9a07a', '#f0e0c0']
+        ];
+        const NEW_LEVELS = [
+            // الفصل 3: الحركة (25-34)
+            { name: 'الجليد', cells: [7, 4], braid: 0.15, time: 110, ice: true, hint: 'الأرض زلقة! الكرة تنزلق قبل أن تتوقف' },
+            { name: 'الطين', cells: [8, 5], braid: 0.1, time: 120, mud: 14, hint: 'الطين 🟤 يبطئ الكرة' },
+            { name: 'الرياح', cells: [8, 5], braid: 0.05, time: 120, wind: { runs: 3, dir: 'back' }, hint: 'رياح تدفعك عكس الاتجاه' },
+            { name: 'التأخير', cells: [7, 4], braid: 0.15, time: 120, lag: 300, hint: 'الكرة تتأخر عن يدك قليلاً' },
+            { name: 'الكرة الكبيرة', cells: [6, 4], braid: 0.1, time: 110, ball: 0.3, hint: 'الكرة كبيرة! الممرات ضيقة عليها' },
+            { name: 'الكرة الصغيرة', cells: [11, 6], braid: 0, time: 150, ball: 0.12, hint: 'كرة صغيرة في متاهة كبيرة' },
+            { name: 'جليد وطين', cells: [8, 5], braid: 0.1, time: 130, ice: true, mud: 10, hint: 'جليد وطين معاً' },
+            { name: 'ريح وجليد', cells: [8, 5], braid: 0.05, time: 140, ice: true, wind: { runs: 3, dir: 'back' }, hint: 'انزلاق مع رياح معاكسة' },
+            { name: 'تأخير وطين', cells: [8, 5], braid: 0.1, time: 150, lag: 250, mud: 8, ball: 0.25, hint: 'تأخير + طين + كرة كبيرة' },
+            { name: 'العاصفة', cells: [10, 6], braid: 0.03, time: 180, ice: true, mud: 12, wind: { runs: 4, dir: 'back' }, stars: 3, hint: 'كل شيء ضدك! اجمع النجوم ⭐' },
+            // الفصل 4: التحكم الغريب (35-44)
+            { name: 'عمودي معكوس', cells: [7, 4], braid: 0.1, time: 120, ctrl: 'my', hint: 'الحركة العمودية معكوسة' },
+            { name: 'معكوس كلياً', cells: [7, 4], braid: 0.1, time: 130, ctrl: 'mxy', hint: 'كل الاتجاهات معكوسة' },
+            { name: 'تبديل المحاور', cells: [7, 4], braid: 0.1, time: 130, ctrl: 'swap', hint: 'يمين ↔ أسفل ، يسار ↔ أعلى' },
+            { name: 'الدوران', cells: [7, 4], braid: 0.1, time: 140, ctrl: 'rot', hint: 'حركتك مدارة 90 درجة!' },
+            { name: 'عكس ونجوم', cells: [8, 5], braid: 0.1, time: 150, ctrl: 'my', stars: 3, hint: 'اجمع النجوم والحركة العمودية معكوسة' },
+            { name: 'عكس وحارس', cells: [8, 5], braid: 0.1, time: 150, ctrl: 'mxy', enemies: 1, hint: 'تحكم معكوس وحارس يتجوّل' },
+            { name: 'تبديل وبوابات', cells: [8, 5], braid: 0, time: 160, ctrl: 'swap', gates: 2, hint: 'المحاور مبدّلة والبوابات تتحرك' },
+            { name: 'دوران ومفتاح', cells: [8, 5], braid: 0, time: 170, ctrl: 'rot', key: true, hint: 'تحكم مدار + مفتاح 🔑 وباب' },
+            { name: 'مرآة في الظلام', cells: [9, 5], braid: 0, time: 180, ctrl: 'mxy', dark: 1.2, hint: 'تحكم معكوس في الظلام' },
+            { name: 'الدوار', cells: [9, 5], braid: 0.05, time: 200, ctrl: 'rot', lag: 200, hint: 'دوران مع تأخير — ركّز!' },
+            // الفصل 5: المطاردة (45-54)
+            { name: 'المطارد', cells: [7, 4], braid: 0.15, time: 120, enemies: ['chase'], hint: 'مطارد 👹 يلاحقك! تحرّك باستمرار' },
+            { name: 'الحارس السريع', cells: [8, 5], braid: 0.1, time: 130, enemies: ['sentry'], hint: 'حارس 🤖 يسير بخط مستقيم بسرعة' },
+            { name: 'الدرع', cells: [8, 5], braid: 0.1, time: 140, enemies: ['chase'], shield: 1, hint: 'التقط الدرع 🛡️ ليحميك من ضربة' },
+            { name: 'الساعات', cells: [9, 5], braid: 0.1, time: 70, clocks: 3, hint: 'وقت قصير! التقط الساعات ⏰ (+10 ث)' },
+            { name: 'مطاردان', cells: [9, 5], braid: 0.1, time: 150, enemies: ['chase', 'chase'], shield: 1, hint: 'مطاردان معاً' },
+            { name: 'الدوريات', cells: [9, 5], braid: 0.1, time: 100, enemies: ['sentry', 'sentry', 'patrol'], clocks: 2, hint: 'ثلاثة حراس وساعات للوقت' },
+            { name: 'الألغام', cells: [8, 5], braid: 0.1, time: 130, mines: 8, hint: 'تجنّب الألغام 💣' },
+            { name: 'ألغام ونجوم', cells: [9, 5], braid: 0.1, time: 150, mines: 10, stars: 4, hint: 'اجمع النجوم وتجنّب الألغام' },
+            { name: 'مطارد وألغام', cells: [9, 5], braid: 0.1, time: 160, enemies: ['chase'], mines: 8, shield: 1, hint: 'مطارد + ألغام + درع' },
+            { name: 'الهروب', cells: [10, 6], braid: 0.05, time: 170, enemies: ['chase', 'chase', 'sentry'], shield: 1, clocks: 2, hint: 'اهرب! ثلاثة أعداء' },
+            // الفصل 6: الألغاز (55-64)
+            { name: 'الترتيب', cells: [7, 4], braid: 0.1, time: 130, orbs: 3, hint: 'اجمع الكرات المرقمة بالترتيب 1 ثم 2 ثم 3' },
+            { name: 'الترتيب الصعب', cells: [9, 5], braid: 0.05, time: 170, orbs: 5, hint: 'خمس كرات مرقمة بالترتيب' },
+            { name: 'مفتاحان', cells: [9, 5], braid: 0, time: 170, locks: ['key', 'key'], hint: 'مفتاحان لبابين بلونين مختلفين' },
+            { name: 'الزر', cells: [8, 5], braid: 0, time: 150, locks: ['switch'], hint: 'اضغط الزر 🔘 فتفتح البوابة 9 ثوانٍ' },
+            { name: 'زرّان', cells: [9, 5], braid: 0, time: 180, locks: ['switch', 'switch'], hint: 'زرّان لبوابتين — اسرع قبل أن تُغلق' },
+            { name: 'جدران وهمية', cells: [9, 5], braid: 0, time: 150, ghost: 8, hint: 'بعض الجدران وهمية (متقطعة) يمكنك المرور منها' },
+            { name: 'ممرات سرية', cells: [9, 5], braid: 0, time: 150, ghost: 10, ghostHidden: true, hint: 'جدران وهمية مخفية — جرّب الاختراق!' },
+            { name: 'مفاتيح وترتيب', cells: [9, 5], braid: 0, time: 200, locks: ['key', 'key'], orbs: 3, hint: 'مفاتيح وكرات مرقمة' },
+            { name: 'زر وحارس', cells: [10, 6], braid: 0, time: 200, locks: ['switch', 'key'], enemies: 1, hint: 'زر ومفتاح وحارس' },
+            { name: 'ثلاثة أقفال', cells: [11, 6], braid: 0, time: 230, locks: ['key', 'switch', 'key'], hint: 'ثلاثة أقفال متنوعة' },
+            // الفصل 7: الأساطير (65-74)
+            { name: 'الوميض', cells: [8, 5], braid: 0.05, time: 140, flicker: true, hint: 'الجدران تظهر لحظة ثم تختفي' },
+            { name: 'الشمعة', cells: [8, 5], braid: 0.05, time: 150, shrink: true, hint: 'الضوء يضيق مع الوقت' },
+            { name: 'وميض وحراس', cells: [9, 5], braid: 0.05, time: 170, flicker: true, enemies: ['sentry'], hint: 'وميض وحارس سريع' },
+            { name: 'شمعة ونجوم', cells: [9, 5], braid: 0.05, time: 130, shrink: true, stars: 4, clocks: 2, hint: 'اجمع النجوم والضوء يخبو' },
+            { name: 'كل الألغاز', cells: [10, 6], braid: 0, time: 220, orbs: 3, locks: ['key'], mines: 5, hint: 'كرات مرقمة + مفتاح + ألغام' },
+            { name: 'العاصفة الكبرى', cells: [10, 6], braid: 0.03, time: 220, ice: true, wind: { runs: 4, dir: 'back' }, enemies: ['chase'], shield: 1, hint: 'جليد ورياح ومطارد' },
+            { name: 'المرايا', cells: [9, 5], braid: 0.05, time: 200, ctrl: 'mxy', flicker: true, stars: 3, hint: 'تحكم معكوس ووميض' },
+            { name: 'المتاهة السرية', cells: [10, 6], braid: 0, time: 220, ghost: 12, ghostHidden: true, dark: 1.1, enemies: ['chase'], hint: 'ممرات سرية في الظلام ومطارد' },
+            { name: 'التحدي الأعظم', cells: [11, 6], braid: 0, time: 280, locks: ['key', 'switch'], enemies: ['chase'], mines: 6, lag: 200, shield: 1, clocks: 2, hint: 'أقفال ومطارد وألغام وتأخير' },
+            { name: 'الأسطورة الخالدة', cells: [12, 7], braid: 0, time: 320, ctrl: 'swap', ice: true, flicker: true, enemies: ['chase', 'sentry'], orbs: 3, shield: 1, clocks: 3, hint: 'التحدي النهائي: كل شيء معاً' }
+        ];
+        NEW_LEVELS.forEach((d, i) => {
+            const pal = PALETTES[(LEVELS.length + i) % PALETTES.length];
+            LEVELS.push(Object.assign({ seed: 300 + i * 13, wall: pal[0], line: pal[1], accent: pal[2] }, d));
+        });
+        const CHAPTERS = [
+            { name: 'كلاسيكي', from: 0, to: 13 }, { name: 'أفكار', from: 14, to: 23 }, { name: 'الحركة', from: 24, to: 33 },
+            { name: 'التحكم', from: 34, to: 43 }, { name: 'المطاردة', from: 44, to: 53 }, { name: 'الألغاز', from: 54, to: 63 },
+            { name: 'الأساطير', from: 64, to: 73 }
+        ];
+        const chapterOf = (i) => CHAPTERS.findIndex(c => i >= c.from && i <= c.to);
+        const isUnlocked = (i) => i < unlocked || CHAPTERS.some(c => c.from === i);
         const MAX_LIVES = 3;
         const HOLD_HAND = 2000;
         const HOLD_POINTER = 700;
         const BLOCK_MS = 2000;
-        const BALL_HIT_R = 0.2;   // نصف قطر الاصطدام (بوحدة الخلية)
-        const BALL_DRAW_R = 0.3;
+        let ballR = 0.2;   // نصف قطر الاصطدام (بوحدة الخلية) ويتغير حسب المستوى
 
         let unlocked = Math.max(1, Math.min(LEVELS.length, GC.store.get('maze_unlocked') || 1));
+        let chapter = 0;       // الفصل المعروض في القائمة
         let selected = 0;      // المستوى المختار في القائمة
         let level = 0;         // المستوى الجاري
         let state = 'INIT';    // INIT, WAITING_START, PLAYING, BLOCKED, OVER
@@ -208,6 +313,15 @@
         let wasPortrait = null;
         let staticLayer = null;
         const ball = { x: 1.5, y: 1.5 };
+        let extras = null;
+        const ctrl = { tx: 0, ty: 0, ix: 0, iy: 0, a: 1, b: 0, c: 0, d: 1 };
+        const vel = { x: 0, y: 0 };
+        let lagHist = [], bonusMs = 0, shield = false, invUntil = 0;
+        const emptyExtras = () => ({ stars: [], key: null, door: null, gates: [], gateAt: {}, portals: [], enemies: [], orbs: [], clocks: [], shields: [], mines: [], mud: {}, wind: {}, locks: [], lockAt: {} });
+        extras = emptyExtras();
+        const limitMs = () => LEVELS[level].time * 1000 + bonusMs;
+        const MEM_MS = 4000;
+        let memUntil = 0, needMsgUntil = 0, portalLock = false;
 
         /* ---------------- توليد المتاهة (ثابت لكل مستوى) ---------------- */
         function mulberry32(a) {
@@ -262,8 +376,247 @@
             gw = grid[0].length;
             startCell = { x: 1, y: 1 };
             endCell = { x: gw - 2, y: gh - 2 };
+            ballR = L.ball || 0.2;
+            buildExtras(L);   // قبل layout لأن بعض العناصر تغيّر الشبكة (جدران وهمية)
             layout();
             resetBall();
+        }
+
+        // عناصر المستويات الخاصة
+        function buildExtras(L) {
+            extras = emptyExtras();
+            portalLock = false;
+            const rnd = mulberry32(L.seed + 777);
+            const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+            const idx = (x, y) => y * gw + x;
+            const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+            const bfs = (blockFn, src) => {
+                const s0 = src || startCell;
+                const dist = {}, par = {}, q = [[s0.x, s0.y]];
+                dist[idx(s0.x, s0.y)] = 0;
+                while (q.length) {
+                    const [x, y] = q.shift();
+                    DIRS.forEach(([dx, dy]) => {
+                        const nx = x + dx, ny = y + dy, k = idx(nx, ny);
+                        if (ny < 0 || nx < 0 || ny >= gh || nx >= gw || grid[ny][nx] === 1 || blockFn(nx, ny) || k in dist) return;
+                        dist[k] = dist[idx(x, y)] + 1; par[k] = [x, y]; q.push([nx, ny]);
+                    });
+                }
+                return { dist, par };
+            };
+            const { dist, par } = bfs(() => false);
+            const path = [];
+            for (let c = [endCell.x, endCell.y]; c; c = par[idx(c[0], c[1])]) path.unshift(c);
+            const onPath = new Set(path.map(c => idx(c[0], c[1])));
+            const maxD = Math.max(...Object.values(dist));
+            const taken = new Set([idx(startCell.x, startCell.y), idx(endCell.x, endCell.y)]);
+            const freeOpen = () => {
+                const a = [];
+                for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) if (grid[y][x] === 0 && !taken.has(idx(x, y))) a.push([x, y]);
+                return a;
+            };
+            const pick = (n, filter, spacing) => {
+                const res = [];
+                for (const c of shuffle(freeOpen().filter(filter || (() => true)))) {
+                    if (res.length >= n) break;
+                    if (res.every(r => Math.abs(r[0] - c[0]) + Math.abs(r[1] - c[1]) >= (spacing || 1))) res.push(c);
+                }
+                res.forEach(c => taken.add(idx(c[0], c[1])));
+                return res;
+            };
+            const usedIdx = new Set();
+            const pathSlot = (frac) => {
+                let i = Math.floor(path.length * frac);
+                while (usedIdx.has(i) || i <= 0 || i >= path.length - 1) i += i <= 0 ? 1 : -1;
+                usedIdx.add(i);
+                return i;
+            };
+
+            // --- الباب الواحد والمفتاح (قيمة 2) ---
+            if (L.key) {
+                const d = path[pathSlot(0.55)];
+                grid[d[1]][d[0]] = 2;
+                extras.door = { x: d[0], y: d[1] };
+                taken.add(idx(d[0], d[1]));
+                const { dist: d2 } = bfs((x, y) => grid[y][x] === 2);
+                let cands = freeOpen().filter(c => idx(c[0], c[1]) in d2 && !onPath.has(idx(c[0], c[1])) && d2[idx(c[0], c[1])] >= 4);
+                if (!cands.length) cands = freeOpen().filter(c => idx(c[0], c[1]) in d2);
+                const k = shuffle(cands)[0] || [startCell.x + 2, startCell.y];
+                taken.add(idx(k[0], k[1]));
+                extras.key = { x: k[0], y: k[1], got: false };
+            }
+            // --- البوابات المتقطعة (قيمة 3) ---
+            const nG = L.gates || 0;
+            for (let g = 1; g <= nG; g++) {
+                const c = path[pathSlot(g / (nG + 1))];
+                grid[c[1]][c[0]] = 3;
+                taken.add(idx(c[0], c[1]));
+                const gate = { x: c[0], y: c[1], off: g * 700 };
+                extras.gates.push(gate);
+                extras.gateAt[idx(c[0], c[1])] = gate;
+            }
+            // --- الأقفال: مفاتيح بألوان وأزرار مؤقتة (قيمة 5) ---
+            if (L.locks) {
+                const colors = ['#e74c3c', '#3498db', '#f1c40f', '#9b59b6'];
+                const n = L.locks.length;
+                L.locks.forEach((kind, i) => {
+                    const c = path[pathSlot((i + 1) / (n + 1))];
+                    grid[c[1]][c[0]] = 5;
+                    taken.add(idx(c[0], c[1]));
+                    const lk = { x: c[0], y: c[1], kind, i, open: false, until: 0, color: colors[i % colors.length], item: null };
+                    extras.locks.push(lk);
+                    extras.lockAt[idx(c[0], c[1])] = lk;
+                });
+                extras.locks.forEach((lk, i) => {
+                    const { dist: dl } = bfs((x, y) => grid[y][x] === 5 && extras.lockAt[idx(x, y)].i >= i);
+                    let cands = freeOpen().filter(c => idx(c[0], c[1]) in dl && dl[idx(c[0], c[1])] >= 3);
+                    // زر البوابة يجب أن يكون قريباً منها لتبقى مفتوحة عند الوصول
+                    if (lk.kind === 'switch') {
+                        const { dist: dg } = bfs(() => false, lk);
+                        const near = cands.filter(c => dg[idx(c[0], c[1])] <= 14);
+                        if (near.length) cands = near;
+                    }
+                    const off = cands.filter(c => !onPath.has(idx(c[0], c[1])));
+                    if (off.length) cands = off;
+                    const k = shuffle(cands)[0] || [startCell.x + 2, startCell.y];
+                    taken.add(idx(k[0], k[1]));
+                    lk.item = { x: k[0], y: k[1], got: false };
+                });
+            }
+            // --- بوابات الانتقال ---
+            if (L.portals) {
+                const off = freeOpen().filter(c => !onPath.has(idx(c[0], c[1])) && idx(c[0], c[1]) in dist);
+                for (let i = 0; i < L.portals; i++) {
+                    const a = shuffle(off.filter(c => dist[idx(c[0], c[1])] <= maxD * 0.45 && !taken.has(idx(c[0], c[1]))))[0];
+                    const b = shuffle(off.filter(c => dist[idx(c[0], c[1])] >= maxD * 0.55 && !taken.has(idx(c[0], c[1]))))[0];
+                    if (!a || !b) continue;
+                    taken.add(idx(a[0], a[1])); taken.add(idx(b[0], b[1]));
+                    extras.portals.push({ a: { x: a[0], y: a[1] }, b: { x: b[0], y: b[1] }, color: ['#00e5ff', '#ff4081', '#b2ff59'][i % 3] });
+                }
+            }
+            // --- كرات مرقمة ونجوم ---
+            if (L.orbs) pick(L.orbs, null, 3).forEach((c, i) => extras.orbs.push({ x: c[0], y: c[1], n: i + 1, got: false }));
+            if (L.stars) pick(L.stars, null, 3).forEach(c => extras.stars.push({ x: c[0], y: c[1], got: false }));
+
+            // --- الألغام: خارج مسار الحل ولا تحجب أي هدف مطلوب ---
+            if (L.mines) {
+                const req = [[endCell.x, endCell.y]]
+                    .concat(extras.stars.map(o => [o.x, o.y]), extras.orbs.map(o => [o.x, o.y]),
+                            extras.locks.map(l => [l.item.x, l.item.y]), extras.key ? [[extras.key.x, extras.key.y]] : []);
+                const mineSet = new Set();
+                const cands = shuffle(freeOpen().filter(c => !onPath.has(idx(c[0], c[1])) && dist[idx(c[0], c[1])] >= 3));
+                for (const c of cands) {
+                    if (extras.mines.length >= L.mines) break;
+                    mineSet.add(idx(c[0], c[1]));
+                    const { dist: dm } = bfs((x, y) => mineSet.has(idx(x, y)));
+                    if (req.every(r => idx(r[0], r[1]) in dm)) {
+                        extras.mines.push({ x: c[0], y: c[1], gone: false });
+                        taken.add(idx(c[0], c[1]));
+                    } else {
+                        mineSet.delete(idx(c[0], c[1]));
+                    }
+                }
+            }
+            // --- ساعات ودرع ---
+            const mineCells = new Set(extras.mines.map(m => idx(m.x, m.y)));
+            const { dist: dSafe } = bfs((x, y) => mineCells.has(idx(x, y)));
+            const safe = (c) => idx(c[0], c[1]) in dSafe;
+            if (L.clocks) pick(L.clocks, safe, 3).forEach(c => extras.clocks.push({ x: c[0], y: c[1], got: false }));
+            if (L.shield) pick(L.shield, safe, 3).forEach(c => extras.shields.push({ x: c[0], y: c[1], got: false }));
+            // --- طين ورياح ---
+            if (L.mud) freeOpen().length && shuffle(freeOpen()).slice(0, L.mud).forEach(c => { extras.mud[idx(c[0], c[1])] = true; });
+            if (L.wind) {
+                for (let r = 0; r < L.wind.runs; r++) {
+                    const st = 2 + Math.floor(rnd() * Math.max(1, path.length - 7));
+                    for (let k = 0; k < 3; k++) {
+                        const i = st + k, c = path[i], nxt = path[L.wind.dir === 'back' ? i - 1 : i + 1];
+                        if (!c || !nxt || grid[c[1]][c[0]] !== 0 || usedIdx.has(i)) continue;
+                        extras.wind[idx(c[0], c[1])] = { dx: nxt[0] - c[0], dy: nxt[1] - c[1] };
+                    }
+                }
+            }
+            // --- جدران وهمية (قيمة 4): جدران داخلية بين ممرين مفتوحين ---
+            if (L.ghost) {
+                const walls = [];
+                for (let y = 1; y < gh - 1; y++) for (let x = 1; x < gw - 1; x++) {
+                    if (grid[y][x] !== 1) continue;
+                    const horiz = x % 2 === 0 && y % 2 === 1 && grid[y][x - 1] === 0 && grid[y][x + 1] === 0;
+                    const vert = x % 2 === 1 && y % 2 === 0 && grid[y - 1][x] === 0 && grid[y + 1][x] === 0;
+                    if (horiz || vert) walls.push([x, y]);
+                }
+                shuffle(walls).slice(0, L.ghost).forEach(c => { grid[c[1]][c[0]] = 4; });
+            }
+            // --- الأعداء ---
+            const types = Array.isArray(L.enemies) ? L.enemies : Array(L.enemies || 0).fill('patrol');
+            if (types.length) {
+                let far = shuffle(freeOpen().filter(c => dist[idx(c[0], c[1])] >= 8));
+                if (far.length < types.length) far = shuffle(freeOpen().filter(c => dist[idx(c[0], c[1])] >= 4));
+                types.forEach((type, i) => {
+                    const c = far[i % Math.max(1, far.length)] || [endCell.x - 2, endCell.y];
+                    const e = { type, fx: c[0], fy: c[1], tx: c[0], ty: c[1], t: 1, x: c[0] + 0.5, y: c[1] + 0.5, dx: 0, dy: 0,
+                                speed: type === 'chase' ? 1.15 + 0.1 * i : type === 'sentry' ? 2.3 : 1.5 + i * 0.3 };
+                    const d0 = DIRS.find(([dx, dy]) => walkable(c[0] + dx, c[1] + dy));
+                    if (d0) { e.dx = d0[0]; e.dy = d0[1]; }
+                    extras.enemies.push(e);
+                });
+            }
+        }
+
+        // خلية يستطيع الأعداء المرور منها
+        function walkable(x, y) {
+            if (y < 0 || x < 0 || y >= gh || x >= gw) return false;
+            const v = grid[y][x];
+            if (v === 1 || v === 2 || v === 4) return false;
+            if (v === 5) { const lk = extras.lockAt[y * gw + x]; return !!lk && lk.kind === 'key' && lk.open; }
+            return true;
+        }
+
+        function distFrom(sx, sy) {
+            const dist = {}, q = [[sx, sy]];
+            dist[sy * gw + sx] = 0;
+            while (q.length) {
+                const [x, y] = q.shift();
+                [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
+                    const nx = x + dx, ny = y + dy, k = ny * gw + nx;
+                    if (walkable(nx, ny) && !(k in dist)) { dist[k] = dist[y * gw + x] + 1; q.push([nx, ny]); }
+                });
+            }
+            return dist;
+        }
+
+        function enemyNext(e) {
+            const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [e.tx + dx, e.ty + dy, dx, dy]).filter(([x, y]) => walkable(x, y));
+            let n = null;
+            if (!nb.length) { e.fx = e.tx; e.fy = e.ty; e.t = 0; return; }
+            if (e.type === 'chase') {
+                const dm = distFrom(Math.floor(ball.x), Math.floor(ball.y));
+                let bd = 1e9;
+                nb.forEach(c => { const d = dm[c[1] * gw + c[0]]; if (d !== undefined && d < bd) { bd = d; n = c; } });
+            } else if (e.type === 'sentry') {
+                n = nb.find(c => c[2] === e.dx && c[3] === e.dy) || nb.find(c => c[2] === -e.dx && c[3] === -e.dy) || nb[0];
+                e.dx = n[2]; e.dy = n[3];
+            } else {
+                const fwd = nb.filter(c => !(c[0] === e.fx && c[1] === e.fy));
+                const pickFrom = fwd.length ? fwd : nb;
+                n = pickFrom[Math.floor(Math.random() * pickFrom.length)];
+            }
+            if (!n) n = nb[Math.floor(Math.random() * nb.length)];
+            e.fx = e.tx; e.fy = e.ty; e.tx = n[0]; e.ty = n[1]; e.t = 0;
+        }
+
+        function gateClosed(cx, cy) {
+            const g = extras.gateAt[cy * gw + cx];
+            if (!g) return false;
+            if ((elapsed + g.off) % 3000 >= 1500) return false;
+            // الكرة داخل البوابة لا تُحبس
+            return !(Math.floor(ball.x) === cx && Math.floor(ball.y) === cy);
+        }
+
+        function lockClosed(cx, cy) {
+            const lk = extras.lockAt[cy * gw + cx];
+            if (!lk) return false;
+            if (lk.kind === 'key' ? lk.open : elapsed < lk.until) return false;
+            return !(Math.floor(ball.x) === cx && Math.floor(ball.y) === cy);
         }
 
         function layout() {
@@ -290,7 +643,18 @@
             for (let r = 0; r < gh; r++) {
                 for (let q = 0; q < gw; q++) {
                     const x = q * cell, y = r * cell;
-                    if (grid[r][q] === 1) {
+                    const v = grid[r][q];
+                    if (v === 4 && !L.ghostHidden) {
+                        c.fillStyle = 'rgba(255,255,255,0.03)';
+                        c.fillRect(x, y, cell, cell);
+                        c.strokeStyle = L.line;
+                        c.globalAlpha = 0.55;
+                        c.lineWidth = 1.5;
+                        c.setLineDash([3, 3]);
+                        c.strokeRect(x + 1.5, y + 1.5, cell - 3, cell - 3);
+                        c.setLineDash([]);
+                        c.globalAlpha = 1;
+                    } else if (v === 1 || v === 4) {
                         c.fillStyle = L.wall;
                         c.fillRect(x, y, cell, cell);
                         c.strokeStyle = L.line;
@@ -323,11 +687,20 @@
         });
 
         /* ---------------- منطق الاصطدام (بوحدة الخلية) ---------------- */
+        function solid(cx, cy) {
+            if (cy < 0 || cx < 0 || cy >= gh || cx >= gw) return true;
+            const v = grid[cy][cx];
+            if (v === 1 || v === 2) return true;
+            if (v === 3) return gateClosed(cx, cy);
+            if (v === 5) return lockClosed(cx, cy);
+            return false;
+        }
+
         function hitsWall(x, y) {
-            const r = BALL_HIT_R;
+            const r = ballR;
             for (let cy = Math.floor(y - r); cy <= Math.floor(y + r); cy++) {
                 for (let cx = Math.floor(x - r); cx <= Math.floor(x + r); cx++) {
-                    if (cy < 0 || cx < 0 || cy >= gh || cx >= gw || grid[cy][cx] === 1) {
+                    if (solid(cx, cy)) {
                         const nx = Math.max(cx, Math.min(x, cx + 1));
                         const ny = Math.max(cy, Math.min(y, cy + 1));
                         if ((x - nx) * (x - nx) + (y - ny) * (y - ny) < r * r) return true;
@@ -346,8 +719,27 @@
             return true;
         }
 
-        function targetGrid() {
+        function rawGrid() {
             return { x: (input.x - offX) / cell, y: (input.y - offY) / cell };
+        }
+        // هدف الكرة أثناء اللعب (يدعم عكس الحركة وتعويض الانتقال)
+        function targetGrid() {
+            const r = rawGrid();
+            const dx = r.x - ctrl.ix, dy = r.y - ctrl.iy;
+            return { x: ctrl.tx + ctrl.a * dx + ctrl.b * dy, y: ctrl.ty + ctrl.c * dx + ctrl.d * dy };
+        }
+
+        function loseLife(why) {
+            lives--;
+            GC.beep(160, 0.25, 'sawtooth', 0.18, 0, 70);
+            GC.vibrate(120);
+            if (lives > 0) {
+                resetBall();
+                state = 'WAITING_START';
+                holdStart = null;
+            } else {
+                finish('lose', why);
+            }
         }
 
         /* ---------------- التحديث ---------------- */
@@ -358,7 +750,7 @@
 
             if (state === 'WAITING_START') {
                 if (!input.active) { holdStart = null; return; }
-                const t = targetGrid();
+                const t = rawGrid();
                 const inside = t.x >= startCell.x - 0.15 && t.x <= startCell.x + 1.15 &&
                                t.y >= startCell.y - 0.15 && t.y <= startCell.y + 1.15;
                 if (!inside) { holdStart = null; return; }
@@ -367,6 +759,15 @@
                 if (now - holdStart >= need) {
                     state = 'PLAYING';
                     resetBall();
+                    const r = rawGrid();
+                    ctrl.ix = r.x; ctrl.iy = r.y;
+                    const M = { mx: [-1, 0, 0, 1], my: [1, 0, 0, -1], mxy: [-1, 0, 0, -1], swap: [0, 1, 1, 0], rot: [0, -1, 1, 0] }[L.ctrl || (L.invert ? 'mx' : '')];
+                    if (M) { ctrl.tx = ball.x; ctrl.ty = ball.y; [ctrl.a, ctrl.b, ctrl.c, ctrl.d] = M; }
+                    else { ctrl.tx = r.x; ctrl.ty = r.y; [ctrl.a, ctrl.b, ctrl.c, ctrl.d] = [1, 0, 0, 1]; }
+                    vel.x = vel.y = 0;
+                    lagHist = [];
+                    portalLock = false;
+                    memUntil = elapsed + MEM_MS;
                     GC.beep(520, 0.12, 'triangle', 0.15);
                     GC.beep(780, 0.18, 'triangle', 0.15, 0.1);
                 }
@@ -376,45 +777,141 @@
             if (state !== 'PLAYING' && state !== 'BLOCKED') return;
 
             elapsed += dt;
-            if (elapsed >= L.time * 1000) { finish('time'); return; }
+            if (elapsed >= limitMs()) { finish('time'); return; }
 
             if (state === 'PLAYING') {
-                if (!input.active) return;
-                const t = targetGrid();
-                const f = 1 - Math.pow(1 - 0.2, dt / 16.67);
-                const dx = (t.x - ball.x) * f, dy = (t.y - ball.y) * f;
-                const n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 0.07));
-                for (let i = 0; i < n; i++) {
-                    const nx = ball.x + dx / n, ny = ball.y + dy / n;
-                    if (hitsWall(nx, ny)) {
-                        state = 'BLOCKED';
-                        blockStart = now;
-                        GC.beep(160, 0.25, 'sawtooth', 0.18, 0, 70);
-                        GC.vibrate(120);
-                        return;
-                    }
-                    ball.x = nx; ball.y = ny;
-                }
-                if (Math.floor(ball.x) === endCell.x && Math.floor(ball.y) === endCell.y) finish('win');
+                if (input.active) movePlayer(L, dt, now);
             } else { // BLOCKED: على اللاعب إعادة يده إلى الممر قبل انتهاء المهلة
                 const t = targetGrid();
                 if (input.active && !hitsWall(t.x, t.y) && segmentClear(ball.x, ball.y, t.x, t.y)) {
                     state = 'PLAYING';
+                    vel.x = vel.y = 0;
                 } else if (now - blockStart >= BLOCK_MS) {
-                    lives--;
-                    if (lives > 0) {
-                        resetBall();
-                        state = 'WAITING_START';
-                        holdStart = null;
-                    } else {
-                        finish('lose');
+                    loseLife();
+                }
+            }
+            if (state === 'PLAYING' || state === 'BLOCKED') moveEnemies(dt);
+        }
+
+        function movePlayer(L, dt, now) {
+            let t = targetGrid();
+            if (L.lag) {
+                lagHist.push({ t: now, x: t.x, y: t.y });
+                while (lagHist.length > 1 && lagHist[1].t <= now - L.lag) lagHist.shift();
+                t = lagHist[0];
+            }
+            const key = Math.floor(ball.y) * gw + Math.floor(ball.x);
+            const mud = extras.mud[key] ? 0.4 : 1;
+            const k = dt / 16.67;
+            let dx, dy;
+            if (L.ice) {
+                // انزلاق: نابض مخمّد
+                vel.x += (t.x - ball.x) * 0.02 * k * mud;
+                vel.y += (t.y - ball.y) * 0.02 * k * mud;
+                const damp = Math.pow(0.88, k);
+                vel.x *= damp; vel.y *= damp;
+                const sp = Math.hypot(vel.x, vel.y);
+                if (sp > 0.45) { vel.x *= 0.45 / sp; vel.y *= 0.45 / sp; }
+                dx = vel.x * k; dy = vel.y * k;
+            } else {
+                const f = 1 - Math.pow(1 - (L.heavy ? 0.06 : 0.2) * mud, k);
+                dx = (t.x - ball.x) * f; dy = (t.y - ball.y) * f;
+            }
+            const n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 0.07));
+            for (let i = 0; i < n; i++) {
+                const nx = ball.x + dx / n, ny = ball.y + dy / n;
+                if (hitsWall(nx, ny)) {
+                    state = 'BLOCKED';
+                    blockStart = now;
+                    vel.x = vel.y = 0;
+                    GC.beep(160, 0.25, 'sawtooth', 0.18, 0, 70);
+                    GC.vibrate(120);
+                    return;
+                }
+                ball.x = nx; ball.y = ny;
+            }
+            const wd = extras.wind[key];
+            if (wd) {
+                const wx = ball.x + wd.dx * 1.4 * dt / 1000, wy = ball.y + wd.dy * 1.4 * dt / 1000;
+                if (!hitsWall(wx, wy)) { ball.x = wx; ball.y = wy; }
+            }
+            collectAndInteract();
+            if (state === 'PLAYING' && Math.floor(ball.x) === endCell.x && Math.floor(ball.y) === endCell.y) {
+                const lacking = extras.stars.some(s => !s.got) || extras.orbs.some(o => !o.got);
+                if (lacking) needMsgUntil = now + 1200;
+                else finish('win');
+            }
+        }
+
+        function collectAndInteract() {
+            const near = (o, r) => Math.hypot(ball.x - (o.x + 0.5), ball.y - (o.y + 0.5)) < (r || 0.5);
+            extras.stars.forEach(s => {
+                if (!s.got && near(s)) { s.got = true; GC.beep(880, 0.12, 'sine', 0.18); GC.beep(1175, 0.15, 'sine', 0.15, 0.08); }
+            });
+            // الكرات المرقمة تُجمع بالترتيب فقط
+            const nextOrb = extras.orbs.find(o => !o.got);
+            if (nextOrb && near(nextOrb)) { nextOrb.got = true; GC.beep(700 + nextOrb.n * 120, 0.15, 'triangle', 0.18); }
+            extras.clocks.forEach(c => {
+                if (!c.got && near(c)) { c.got = true; bonusMs += 10000; GC.beep(1000, 0.1, 'square', 0.12); GC.beep(1400, 0.15, 'square', 0.12, 0.08); }
+            });
+            extras.shields.forEach(c => {
+                if (!c.got && near(c)) { c.got = true; shield = true; GC.beep(500, 0.2, 'sine', 0.2, 0, 900); }
+            });
+            const k = extras.key;
+            if (k && !k.got && near(k)) {
+                k.got = true;
+                grid[extras.door.y][extras.door.x] = 0;
+                extras.door = null;
+                GC.beep(660, 0.1, 'triangle', 0.2); GC.beep(990, 0.2, 'triangle', 0.2, 0.1);
+            }
+            extras.locks.forEach(lk => {
+                const it = lk.item;
+                if (!it || !near(it, 0.45)) return;
+                if (lk.kind === 'key' && !it.got) { it.got = true; lk.open = true; GC.beep(660, 0.1, 'triangle', 0.2); GC.beep(990, 0.2, 'triangle', 0.2, 0.1); }
+                if (lk.kind === 'switch' && elapsed > lk.until) { it.got = true; lk.until = elapsed + 9000; GC.beep(440, 0.1, 'square', 0.15); GC.beep(880, 0.15, 'square', 0.15, 0.08); }
+            });
+            for (const m of extras.mines) {
+                if (!m.gone && near(m, 0.4) && elapsed > invUntil) {
+                    m.gone = true;
+                    GC.beep(100, 0.35, 'sawtooth', 0.25, 0, 40);
+                    if (shield) { shield = false; invUntil = elapsed + 1500; }
+                    else { loseLife('mine'); return; }
+                }
+            }
+            // بوابات الانتقال: نعوّض الهدف حتى لا تحاول الكرة العودة عبر الجدران
+            let nearPortal = false;
+            for (const p of extras.portals) {
+                for (const [from, to] of [[p.a, p.b], [p.b, p.a]]) {
+                    const d = Math.hypot(ball.x - (from.x + 0.5), ball.y - (from.y + 0.5));
+                    if (d < 0.85) nearPortal = true;
+                    if (d < 0.3 && !portalLock) {
+                        const nx = to.x + 0.5, ny = to.y + 0.5;
+                        ctrl.tx += nx - ball.x; ctrl.ty += ny - ball.y;
+                        ball.x = nx; ball.y = ny;
+                        portalLock = true;
+                        GC.beep(300, 0.3, 'sine', 0.2, 0, 1200);
+                        return;
                     }
+                }
+            }
+            if (!nearPortal) portalLock = false;
+        }
+
+        function moveEnemies(dt) {
+            for (const e of extras.enemies) {
+                e.t += e.speed * dt / 1000;
+                while (e.t >= 1) { const over = e.t - 1; enemyNext(e); e.t = over; }
+                e.x = e.fx + 0.5 + (e.tx - e.fx) * e.t;
+                e.y = e.fy + 0.5 + (e.ty - e.fy) * e.t;
+                if (Math.hypot(ball.x - e.x, ball.y - e.y) < 0.5 && elapsed > invUntil) {
+                    if (shield) { shield = false; invUntil = elapsed + 1500; GC.beep(300, 0.2, 'triangle', 0.2); }
+                    else { loseLife('enemy'); return; }
                 }
             }
         }
 
         /* ---------------- النهاية والقوائم ---------------- */
-        function finish(kind) {
+        function finish(kind, why) {
             state = 'OVER';
             if (kind === 'win') {
                 const key = 'maze_best_' + level;
@@ -426,6 +923,7 @@
                 }
                 const last = level === LEVELS.length - 1;
                 selected = last ? 0 : level + 1;
+                chapter = chapterOf(selected);
                 overlayMode = last ? 'done' : 'win';
                 const secs = (elapsed / 1000).toFixed(1);
                 const bestSecs = (Math.min(best || Infinity, Math.round(elapsed)) / 1000).toFixed(1);
@@ -436,10 +934,11 @@
             } else {
                 overlayMode = 'lose';
                 selected = level;
+                chapter = chapterOf(selected);
                 uiTitle.innerText = kind === 'time' ? 'انتهى الوقت! ⏱️' : 'انتهت المحاولات! ❌';
                 uiTitle.style.color = '#ff4d4d';
                 uiDesc.innerHTML = kind === 'time' ? 'لم تصل إلى النهاية في الوقت المحدد. جرّب مرة أخرى!'
-                                                   : 'اصطدمت بالجدران 3 مرات. ركّز أكثر في المرة القادمة!';
+                                                   : (why === 'enemy' ? 'أمسك بك الحارس! ركّز أكثر في المرة القادمة.' : why === 'mine' ? 'انفجر بك لغم 💣! ركّز أكثر في المرة القادمة.' : 'خسرت كل المحاولات. ركّز أكثر في المرة القادمة!');
                 [330, 262, 196, 130].forEach((f, i) => GC.beep(f, 0.25, 'square', 0.12, i * 0.15));
             }
             showOverlay();
@@ -453,16 +952,29 @@
         }
 
         function buildPicker() {
-            levelPicker.innerHTML = '';
-            LEVELS.forEach((L, i) => {
+            chapterPicker.innerHTML = '';
+            CHAPTERS.forEach((c, ci) => {
                 const b = document.createElement('button');
-                const locked = i >= unlocked;
+                b.className = 'lvl chap' + (ci === chapter ? ' sel' : '');
+                b.textContent = c.name;
+                b.addEventListener('click', () => {
+                    chapter = ci;
+                    if (chapterOf(selected) !== ci) selected = c.from;
+                    buildPicker();
+                });
+                chapterPicker.appendChild(b);
+            });
+            levelPicker.innerHTML = '';
+            for (let i = CHAPTERS[chapter].from; i <= CHAPTERS[chapter].to; i++) {
+                const L = LEVELS[i];
+                const b = document.createElement('button');
+                const locked = !isUnlocked(i);
                 b.className = 'lvl' + (i === selected ? ' sel' : '');
                 b.disabled = locked;
                 b.innerHTML = (locked ? '🔒' : (i + 1)) + `<small>${L.name}</small>`;
                 b.addEventListener('click', () => { selected = i; buildPicker(); });
                 levelPicker.appendChild(b);
-            });
+            }
             const lbl = { start: 'ابدأ', win: 'المستوى التالي', done: 'العب من جديد', lose: 'حاول مرة أخرى' }[overlayMode];
             startBtn.innerText = overlayMode === 'win' || overlayMode === 'done'
                 ? lbl : `${lbl}: المستوى ${selected + 1} - ${LEVELS[selected].name}`;
@@ -475,6 +987,7 @@
             level = selected;
             lives = MAX_LIVES;
             elapsed = 0;
+            bonusMs = 0; shield = false; invUntil = 0;
             holdStart = null;
             buildLevel();
             state = 'WAITING_START';
@@ -538,6 +1051,118 @@
             });
         }
 
+        function drawExtras(now) {
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = `${cell * 0.6}px Arial`;
+            ctx.fillStyle = '#fff';
+            if (extras.door) {
+                const d = extras.door;
+                ctx.fillStyle = '#c0392b';
+                ctx.fillRect(px(d.x) + 1, py(d.y) + 1, cell - 2, cell - 2);
+                ctx.fillStyle = '#fff';
+                ctx.fillText('🔒', px(d.x + 0.5), py(d.y + 0.55));
+            }
+            if (extras.key && !extras.key.got) {
+                ctx.fillText('🔑', px(extras.key.x + 0.5), py(extras.key.y + 0.55) + Math.sin(now / 200) * cell * 0.05);
+            }
+            for (const g of extras.gates) {
+                const t = (elapsed + g.off) % 3000;
+                const closed = gateClosed(g.x, g.y);
+                const warn = t >= 2500;
+                if (closed) {
+                    ctx.fillStyle = '#e74c3c';
+                    ctx.fillRect(px(g.x) + 1, py(g.y) + 1, cell - 2, cell - 2);
+                    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+                    for (let k = 0; k < 3; k++) ctx.fillRect(px(g.x) + 3, py(g.y) + cell * (0.2 + k * 0.28), cell - 6, cell * 0.1);
+                } else {
+                    ctx.strokeStyle = warn && Math.floor(now / 120) % 2 ? '#ff8a80' : 'rgba(231,76,60,0.45)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([4, 4]);
+                    ctx.strokeRect(px(g.x) + 2, py(g.y) + 2, cell - 4, cell - 4);
+                    ctx.setLineDash([]);
+                }
+            }
+            for (const p of extras.portals) {
+                [p.a, p.b].forEach(c => {
+                    const cx = px(c.x + 0.5), cy = py(c.y + 0.5);
+                    ctx.strokeStyle = p.color;
+                    ctx.lineWidth = Math.max(2, cell * 0.1);
+                    ctx.shadowColor = p.color; ctx.shadowBlur = 12;
+                    ctx.setLineDash([cell * 0.2, cell * 0.12]);
+                    ctx.lineDashOffset = -now / 40;
+                    ctx.beginPath(); ctx.arc(cx, cy, cell * 0.36, 0, Math.PI * 2); ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.beginPath(); ctx.arc(cx, cy, cell * 0.14, 0, Math.PI * 2); ctx.fillStyle = p.color; ctx.fill();
+                    ctx.shadowBlur = 0;
+                });
+            }
+            drawNewExtras(now);
+            ctx.font = `${cell * 0.6}px Arial`;
+            ctx.fillStyle = '#fff';
+            for (const s of extras.stars) {
+                if (!s.got) ctx.fillText('⭐', px(s.x + 0.5), py(s.y + 0.55) + Math.sin(now / 250 + s.x) * cell * 0.05);
+            }
+            for (const e of extras.enemies) ctx.fillText(e.type === 'chase' ? '👹' : e.type === 'sentry' ? '🤖' : '👾', px(e.x), py(e.y + 0.05));
+        }
+
+        // رسم عناصر المستويات الجديدة: طين، رياح، أقفال، كرات، ألغام، ساعات، درع
+        function drawNewExtras(now) {
+            const W = gw;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            for (const k in extras.mud) {
+                const x = k % W, y = Math.floor(k / W);
+                ctx.fillStyle = 'rgba(121,85,48,0.7)';
+                ctx.fillRect(px(x) + 1, py(y) + 1, cell - 2, cell - 2);
+                ctx.fillStyle = 'rgba(70,45,20,0.8)';
+                ctx.beginPath(); ctx.arc(px(x + 0.3), py(y + 0.35), cell * 0.1, 0, 7); ctx.arc(px(x + 0.65), py(y + 0.6), cell * 0.13, 0, 7); ctx.fill();
+            }
+            for (const k in extras.wind) {
+                const x = k % W, y = Math.floor(k / W), w = extras.wind[k];
+                ctx.save();
+                ctx.translate(px(x + 0.5), py(y + 0.5));
+                ctx.rotate(Math.atan2(w.dy, w.dx));
+                ctx.fillStyle = 'rgba(100,220,255,' + (0.45 + 0.3 * Math.sin(now / 150)) + ')';
+                ctx.beginPath(); ctx.moveTo(cell * 0.32, 0); ctx.lineTo(-cell * 0.2, -cell * 0.26); ctx.lineTo(-cell * 0.2, cell * 0.26); ctx.closePath(); ctx.fill();
+                ctx.restore();
+            }
+            for (const lk of extras.locks) {
+                const isOpen = lk.kind === 'key' ? lk.open : elapsed < lk.until;
+                if (isOpen) {
+                    ctx.strokeStyle = lk.color; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+                    ctx.strokeRect(px(lk.x) + 2, py(lk.y) + 2, cell - 4, cell - 4); ctx.setLineDash([]);
+                } else {
+                    ctx.fillStyle = lk.color;
+                    ctx.fillRect(px(lk.x) + 1, py(lk.y) + 1, cell - 2, cell - 2);
+                    ctx.font = `${cell * 0.55}px Arial`; ctx.fillStyle = '#fff';
+                    ctx.fillText('🔒', px(lk.x + 0.5), py(lk.y + 0.55));
+                }
+                const it = lk.item;
+                if (it && !(lk.kind === 'key' && it.got)) {
+                    ctx.beginPath(); ctx.arc(px(it.x + 0.5), py(it.y + 0.5), cell * 0.36, 0, 7);
+                    ctx.fillStyle = lk.color; ctx.globalAlpha = 0.85; ctx.fill(); ctx.globalAlpha = 1;
+                    ctx.font = `${cell * 0.45}px Arial`; ctx.fillStyle = '#fff';
+                    ctx.fillText(lk.kind === 'key' ? '🔑' : '🔘', px(it.x + 0.5), py(it.y + 0.55));
+                }
+            }
+            const nextOrb = extras.orbs.find(o => !o.got);
+            for (const o of extras.orbs) {
+                if (o.got) continue;
+                const isNext = o === nextOrb;
+                ctx.beginPath(); ctx.arc(px(o.x + 0.5), py(o.y + 0.5), cell * (isNext ? 0.4 + 0.04 * Math.sin(now / 150) : 0.34), 0, 7);
+                ctx.fillStyle = isNext ? '#29b6f6' : 'rgba(41,182,246,0.3)'; ctx.fill();
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = isNext ? 2.5 : 1; ctx.stroke();
+                ctx.font = `bold ${cell * 0.45}px Arial`; ctx.fillStyle = '#fff';
+                ctx.fillText(o.n, px(o.x + 0.5), py(o.y + 0.55));
+            }
+            ctx.font = `${cell * 0.6}px Arial`;
+            ctx.fillStyle = '#fff';
+            for (const c of extras.clocks) if (!c.got) ctx.fillText('⏰', px(c.x + 0.5), py(c.y + 0.55));
+            for (const c of extras.shields) if (!c.got) ctx.fillText('🛡️', px(c.x + 0.5), py(c.y + 0.55));
+            for (const m of extras.mines) if (!m.gone) ctx.fillText('💣', px(m.x + 0.5), py(m.y + 0.55));
+        }
+
         function draw(now) {
             GC.begin(ctx);
             const { w, h } = GC.view;
@@ -566,11 +1191,13 @@
             ctx.fillText('🚩', px(startCell.x + 0.5), py(startCell.y + 0.55));
             ctx.fillText('🏁', px(endCell.x + 0.5), py(endCell.y + 0.55));
 
+            drawExtras(now);
+
             // الكرة
             const bx = px(ball.x), by = py(ball.y);
             const bad = state === 'BLOCKED' || !input.active;
             ctx.beginPath();
-            ctx.arc(bx, by, cell * BALL_DRAW_R, 0, Math.PI * 2);
+            ctx.arc(bx, by, cell * ballR * 1.5, 0, Math.PI * 2);
             ctx.fillStyle = bad ? '#ff4d4d' : L.accent;
             ctx.shadowColor = ctx.fillStyle;
             ctx.shadowBlur = 15;
@@ -592,8 +1219,14 @@
             }
 
             // وضع الظلام
-            if (L.dark && (state === 'PLAYING' || state === 'BLOCKED')) {
-                const g = ctx.createRadialGradient(bx, by, cell * 1.6, bx, by, cell * 3.6);
+            const memHidden = L.memory && elapsed > memUntil;
+            const flickHidden = L.flicker && (elapsed % 4000) > 1200;
+            if ((L.dark || memHidden || flickHidden || L.shrink) && (state === 'PLAYING' || state === 'BLOCKED')) {
+                let ds = L.dark === true ? 1 : (L.dark || 1);
+                if (L.memory || L.flicker) ds = 0.9;
+                if (L.shrink) ds = Math.max(0.5, 1.8 - 1.3 * Math.min(1, elapsed / limitMs()));
+                if (shield) { ctx.beginPath(); ctx.arc(bx, by, cell * ballR * 2.2, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(120,200,255,0.9)'; ctx.lineWidth = 2; ctx.stroke(); }
+                const g = ctx.createRadialGradient(bx, by, cell * 1.6 * ds, bx, by, cell * 3.6 * ds);
                 g.addColorStop(0, 'rgba(11,12,16,0)');
                 g.addColorStop(1, 'rgba(11,12,16,0.95)');
                 ctx.fillStyle = g;
@@ -611,13 +1244,19 @@
                 ctx.lineWidth = Math.max(4, cell * 0.12);
                 ctx.stroke();
                 const how = input.mode === 'pointer' ? 'المس المربع الأخضر وثبّت إصبعك' : 'ثبّت يدك على المربع الأخضر';
-                textBox([how, input.active ? `${Math.max(0, ((need - (holdStart ? now - holdStart : 0)) / 1000)).toFixed(1)} ثانية` : 'ارفع كفك أمام الكاميرا أو المس الشاشة'],
-                        cy, ['#fff', '#66fcf1']);
+                const lines = [how, input.active ? `${Math.max(0, ((need - (holdStart ? now - holdStart : 0)) / 1000)).toFixed(1)} ثانية` : 'ارفع كفك أمام الكاميرا أو المس الشاشة'];
+                const cols = ['#fff', '#66fcf1'];
+                if (L.hint) { lines.push(L.hint); cols.push('#ffd36b'); }
+                textBox(lines, cy, cols);
             } else if (state === 'BLOCKED') {
                 ctx.fillStyle = 'rgba(255,77,77,0.18)';
                 ctx.fillRect(0, 0, w, h);
                 const left = Math.max(0, (BLOCK_MS - (now - blockStart)) / 1000).toFixed(1);
                 textBox(['⚠️ اصطدمت بالجدار!', `أعد يدك إلى الممر خلال ${left} ث`], cy, ['#ff6b6b', '#fff']);
+            } else if (state === 'PLAYING' && L.memory && elapsed < memUntil) {
+                textBox([`احفظ الطريق! ${Math.ceil((memUntil - elapsed) / 1000)}`], offY + cell * 0.6, ['#7cc4ff']);
+            } else if (state === 'PLAYING' && now < needMsgUntil) {
+                textBox([extras.orbs.some(o => !o.got) ? 'اجمع كل الكرات بالترتيب أولاً 🔵' : 'اجمع كل النجوم أولاً ⭐'], cy, ['#ffd36b']);
             } else if (state === 'PLAYING' && !input.active) {
                 textBox(['أين يدك؟ ارفع كفك أو المس الشاشة'], cy, ['#ff6b6b']);
             }
@@ -626,8 +1265,13 @@
         function updateHud() {
             const L = LEVELS[level];
             const showLevel = state !== 'INIT';
-            hudLevel.textContent = showLevel ? `المستوى ${level + 1}: ${L.name}` : 'المتاهة';
-            const left = showLevel ? Math.max(0, Math.ceil((L.time * 1000 - elapsed) / 1000)) : 0;
+            let extra = '';
+            if (showLevel && extras.stars.length) extra += `  ⭐${extras.stars.filter(s => s.got).length}/${extras.stars.length}`;
+            if (showLevel && extras.key) extra += extras.key.got ? '  🔓' : '  🔑';
+            if (showLevel && extras.orbs.length) extra += `  🔵${extras.orbs.filter(o => o.got).length}/${extras.orbs.length}`;
+            if (showLevel && shield) extra += '  🛡️';
+            hudLevel.textContent = showLevel ? `المستوى ${level + 1}: ${L.name}${extra}` : 'المتاهة';
+            const left = showLevel ? Math.max(0, Math.ceil((limitMs() - elapsed) / 1000)) : 0;
             hudTime.textContent = showLevel ? `⏱ ${left} ث` : '';
             hudTime.className = left <= 15 && showLevel ? 'low' : '';
             hudLives.textContent = showLevel ? '❤️'.repeat(Math.max(0, lives)) + '🖤'.repeat(MAX_LIVES - Math.max(0, lives)) : '';

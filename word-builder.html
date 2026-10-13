@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>بنّاء الكلمات</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="game-common.js"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+            background: #0b1f2a; color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; -webkit-user-select: none; user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #bg { position: fixed; inset: 0; background: radial-gradient(circle at 50% 20%, #164a5a 0%, #0b1f2a 70%); }
+        #video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0.18; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+
+        .overlay {
+            position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; text-align: center;
+            background: rgba(7, 22, 30, 0.94); padding: 16px; overflow-y: auto;
+        }
+        .overlay > * { flex-shrink: 0; }
+        h1 { margin: 0 0 8px; font-size: clamp(1.7rem, 7vw, 2.8rem); color: #5eead4; text-shadow: 0 0 14px rgba(94, 234, 212, 0.6); }
+        p { margin: 0 0 14px; max-width: 560px; line-height: 1.7; color: #cbe7ee; font-size: clamp(0.95rem, 3.5vw, 1.15rem); }
+        button {
+            font-family: inherit; cursor: pointer; border: 2px solid #5eead4; color: #fff;
+            background: #0f766e; border-radius: 50px; padding: 12px 40px;
+            font-size: clamp(1.1rem, 4.5vw, 1.4rem); box-shadow: 0 0 16px rgba(94, 234, 212, 0.4);
+        }
+        button:active { transform: scale(0.97); }
+        #levels { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 0 0 16px; width: min(92vw, 460px); }
+        .lv { padding: 6px 0; font-size: 1.15rem; border-radius: 14px; background: #123845; box-shadow: none; line-height: 1.25; }
+        .lv small { display: block; font-size: 0.7rem; letter-spacing: 1px; min-height: 1em; }
+        .lv.sel { background: #5eead4; color: #04201b; }
+        .lv:disabled { opacity: 0.35; cursor: not-allowed; }
+        .hidden { display: none !important; }
+        .loader { border: 5px solid rgba(255,255,255,0.1); border-top-color: #5eead4; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 14px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-height: 460px) { h1 { margin-bottom: 2px; } p { margin-bottom: 6px; } #levels { margin-bottom: 8px; } button { padding: 8px 28px; } .lv { padding: 3px 0; } }
+    </style>
+</head>
+<body>
+    <div id="bg"></div>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+    <div id="overlay" class="overlay">
+        <div id="loader" class="loader"></div>
+        <h1 id="title">بنّاء الكلمات</h1>
+        <p id="desc">جاري تشغيل الكاميرا...</p>
+        <div id="levels" class="hidden"></div>
+        <button id="startBtn" class="hidden">ابدأ</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('video');
+        const overlay = document.getElementById('overlay');
+        const titleEl = document.getElementById('title');
+        const descEl = document.getElementById('desc');
+        const loader = document.getElementById('loader');
+        const levelsEl = document.getElementById('levels');
+        const startBtn = document.getElementById('startBtn');
+
+        /* ---------------- بنك الكلمات: [الكلمة، الصورة، التصنيف] ---------------- */
+        const BANK = {
+            3: [['قمر', '🌙', 'السماء'], ['شمس', '☀️', 'السماء'], ['بيت', '🏠', 'مكان'], ['باب', '🚪', 'مكان'], ['جمل', '🐪', 'حيوان'],
+                ['نحل', '🐝', 'حشرة'], ['ورد', '🌹', 'نبات'], ['قطة', '🐱', 'حيوان'], ['بطة', '🦆', 'طائر'], ['فيل', '🐘', 'حيوان'],
+                ['سمك', '🐟', 'حيوان'], ['كلب', '🐶', 'حيوان'], ['عنب', '🍇', 'فاكهة'], ['موز', '🍌', 'فاكهة'], ['نمر', '🐅', 'حيوان'],
+                ['قرد', '🐒', 'حيوان'], ['أسد', '🦁', 'حيوان'], ['ماء', '💧', 'شراب'], ['نار', '🔥', 'حرارة'], ['حوت', '🐋', 'حيوان'],
+                ['ديك', '🐓', 'طائر'], ['قلم', '✏️', 'أداة'], ['ثلج', '❄️', 'طقس'], ['تاج', '👑', 'ملابس'], ['كرة', '⚽', 'لعبة']],
+            4: [['تفاح', '🍎', 'فاكهة'], ['كتاب', '📖', 'أداة'], ['بقرة', '🐄', 'حيوان'], ['حصان', '🐴', 'حيوان'], ['ثعلب', '🦊', 'حيوان'],
+                ['شجرة', '🌳', 'نبات'], ['نجمة', '⭐', 'السماء'], ['خروف', '🐑', 'حيوان'], ['غزال', '🦌', 'حيوان'], ['جزرة', '🥕', 'خضار'],
+                ['ساعة', '⏰', 'أداة'], ['نخلة', '🌴', 'نبات'], ['أرنب', '🐰', 'حيوان'], ['ضفدع', '🐸', 'حيوان'], ['قنفذ', '🦔', 'حيوان'],
+                ['هاتف', '📱', 'أداة'], ['قطار', '🚆', 'مركبة'], ['عقرب', '🦂', 'حشرة'], ['بطيخ', '🍉', 'فاكهة'], ['غيمة', '☁️', 'السماء'],
+                ['قلعة', '🏰', 'مكان'], ['خيمة', '⛺', 'مكان']],
+            5: [['سيارة', '🚗', 'مركبة'], ['طائرة', '✈️', 'مركبة'], ['دراجة', '🚲', 'مركبة'], ['فراشة', '🦋', 'حشرة'], ['زرافة', '🦒', 'حيوان'],
+                ['مدرسة', '🏫', 'مكان'], ['عصفور', '🐦', 'طائر'], ['ثعبان', '🐍', 'حيوان'], ['سفينة', '🚢', 'مركبة'], ['ملعقة', '🥄', 'أداة'],
+                ['تلفاز', '📺', 'أداة'], ['حاسوب', '💻', 'أداة'], ['مكتبة', '📚', 'مكان'], ['بالون', '🎈', 'لعبة'], ['تمساح', '🐊', 'حيوان'],
+                ['بطريق', '🐧', 'طائر'], ['طاووس', '🦚', 'طائر'], ['حلزون', '🐌', 'حيوان'], ['دلفين', '🐬', 'حيوان'], ['كمثرى', '🍐', 'فاكهة'],
+                ['بطاطس', '🥔', 'خضار'], ['طماطم', '🍅', 'خضار'], ['ليمون', '🍋', 'فاكهة'], ['مفتاح', '🔑', 'أداة'], ['بركان', '🌋', 'طبيعة'],
+                ['صاروخ', '🚀', 'مركبة'], ['نظارة', '👓', 'أداة'], ['مطرقة', '🔨', 'أداة']],
+            6: [['برتقال', '🍊', 'فاكهة'], ['سلحفاة', '🐢', 'حيوان'], ['عنكبوت', '🕷️', 'حشرة'], ['فراولة', '🍓', 'فاكهة'],
+                ['مروحية', '🚁', 'مركبة'], ['عصفورة', '🐤', 'طائر'], ['خنفساء', '🪲', 'حشرة']]
+        };
+        const EXTRA_LETTERS = 'ابتثجحخدذرزسشصضطظعغفقكلمنهوي';
+
+        /* ---------------- المستويات الخمسة عشر ----------------
+           hint: word = الكلمة + الصورة | pic = الصورة فقط | cat = التصنيف فقط | memory = الكلمة 3 ثوانٍ ثم التصنيف فقط
+           lens: أطوال الكلمات | words: عدد الكلمات | extra: حروف مشتتة | speed: سرعة الحروف | time: ثوانٍ (0 = بلا وقت) */
+        const LEVELS = [
+            { name: 'البداية',    hint: 'word',   lens: [3],     words: 2, extra: 0, speed: 0.5, time: 0 },
+            { name: 'ثلاثية',     hint: 'word',   lens: [3],     words: 3, extra: 2, speed: 0.6, time: 0 },
+            { name: 'بالصور',     hint: 'pic',    lens: [3],     words: 3, extra: 3, speed: 0.7, time: 0 },
+            { name: 'رباعية',     hint: 'word',   lens: [4],     words: 2, extra: 2, speed: 0.7, time: 0 },
+            { name: 'رباعية 2',   hint: 'pic',    lens: [4],     words: 3, extra: 4, speed: 0.8, time: 0 },
+            { name: 'السرعة',     hint: 'pic',    lens: [4],     words: 3, extra: 4, speed: 0.9, time: 90 },
+            { name: 'مزيج',       hint: 'pic',    lens: [4, 5],  words: 3, extra: 4, speed: 1.0, time: 120 },
+            { name: 'خماسية',     hint: 'word',   lens: [5],     words: 3, extra: 5, speed: 1.0, time: 0 },
+            { name: 'خماسية 2',   hint: 'pic',    lens: [5],     words: 3, extra: 6, speed: 1.1, time: 100 },
+            { name: 'الذاكرة',    hint: 'memory', lens: [4, 5],  words: 3, extra: 5, speed: 1.0, time: 0 },
+            { name: 'العاصفة',    hint: 'pic',    lens: [4, 5],  words: 4, extra: 6, speed: 1.7, time: 120 },
+            { name: 'التلميح',    hint: 'cat',    lens: [4, 5],  words: 3, extra: 5, speed: 1.1, time: 0 },
+            { name: 'الطويلة',    hint: 'pic',    lens: [5, 6],  words: 3, extra: 7, speed: 1.2, time: 130 },
+            { name: 'الخبير',     hint: 'cat',    lens: [5, 6],  words: 4, extra: 7, speed: 1.5, time: 150 },
+            { name: 'الأسطورة',   hint: 'memory', lens: [6],     words: 4, extra: 8, speed: 1.6, time: 180 }
+        ];
+        const MAX_MISTAKES = 5;
+        const DWELL = 0.45;       // زمن تثبيت اليد فوق الحرف لالتقاطه
+        const MEMORY_MS = 3000;
+
+        let unlocked = Math.max(1, Math.min(LEVELS.length, GC.store.get('wb_unlocked') || 1));
+        let selected = 0;
+        let level = 0;
+        let state = 'MENU';       // MENU, PLAY, WORD_DONE, END
+        let words = [], wordIdx = 0, cur = null;
+        let slots = [], bubbles = [], particles = [];
+        let mistakes = 0, timeLeft = 0, flash = 0, flashColor = '255,80,80';
+        let doneUntil = 0, memoryUntil = 0, idleT = 0, startedAt = 0;
+        let lastT = performance.now();
+        let usedWords = new Set();
+        let w = 0, h = 0, S = 1, R = 30, slotSize = 56, fieldTop = 0, fieldBottom = 0, hudH = 44, picH = 100;
+        let overlayKind = 'start';
+
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; layout(); });
+
+        function layout() {
+            S = Math.max(0.5, Math.min(1.5, h / 700));
+            R = Math.max(24, Math.min(40, Math.min(w, h) * 0.06));
+            hudH = Math.max(44, Math.min(60, h * 0.07)) + 0;
+            picH = Math.max(70, Math.min(190, h * 0.2));
+            const n = cur ? cur.word.length : 4;
+            slotSize = Math.max(40, Math.min(76, (w - 30) / n * 0.88, h * 0.13));
+            const slotY = hudH + picH + slotSize * 0.75;
+            fieldTop = slotY + slotSize * 0.8;
+            fieldBottom = h - 14;
+            slots.forEach((s, i) => { const p = slotPos(i, slots.length, slotY); s.x = p.x; s.y = p.y; s.size = slotSize; });
+            bubbles.forEach(b => { b.r = R; b.x = Math.max(R, Math.min(w - R, b.x)); b.y = Math.max(fieldTop + R, Math.min(fieldBottom - R, b.y)); });
+        }
+        function slotPos(i, n, y) {
+            const gap = slotSize * 1.12;
+            return { x: w / 2 + ((n - 1) / 2 - i) * gap, y };   // الحرف الأول من اليمين
+        }
+
+        /* ---------------- المؤشرات: يدان من الكاميرا + إصبع/فأرة ---------------- */
+        const cursors = [
+            { id: 'h0', type: 'hand', x: 0, y: 0, active: false, dwellB: null, dwell: 0, carry: null, carryT: 0, wrongT: 0, lost: 0, color: '#f472b6' },
+            { id: 'h1', type: 'hand', x: 0, y: 0, active: false, dwellB: null, dwell: 0, carry: null, carryT: 0, wrongT: 0, lost: 0, color: '#38bdf8' },
+            { id: 'p', type: 'pointer', x: 0, y: 0, active: false, dwellB: null, dwell: 0, carry: null, carryT: 0, wrongT: 0, lost: 0, color: '#facc15' }
+        ];
+        const handCursors = [cursors[0], cursors[1]];
+        const ptr = cursors[2];
+        let lastPointerT = 0;
+
+        function onHands(list) {
+            // list: نقاط الشاشة [{x,y}] — نطابق كل نقطة بأقرب مؤشر نشط ثم نوزّع الباقي
+            const pts = list.slice(0, 2);
+            const used = new Set();
+            const assign = [];
+            handCursors.filter(c => c.active).forEach(c => {
+                let best = -1, bd = 1e9;
+                pts.forEach((p, i) => { if (used.has(i)) return; const d = Math.hypot(p.x - c.x, p.y - c.y); if (d < bd) { bd = d; best = i; } });
+                if (best >= 0) { used.add(best); assign.push([c, pts[best]]); }
+            });
+            pts.forEach((p, i) => {
+                if (used.has(i)) return;
+                const c = handCursors.find(k => !k.active && !assign.some(a => a[0] === k));
+                if (c) { c.x = p.x; c.y = p.y; assign.push([c, p]); }
+            });
+            handCursors.forEach(c => {
+                const a = assign.find(x => x[0] === c);
+                if (a) { c.x += (a[1].x - c.x) * 0.55; c.y += (a[1].y - c.y) * 0.55; c.active = true; c.lost = 0; }
+                else c.active = false;
+            });
+        }
+
+        function ptrDown(e) {
+            if (e.target.closest && e.target.closest('button, .overlay, #remote-back-btn')) return;
+            ptr.x = e.clientX; ptr.y = e.clientY; ptr.active = true; lastPointerT = performance.now();
+            if (state !== 'PLAY' || ptr.carry) return;
+            const b = bubbleAt(ptr.x, ptr.y, 14);
+            if (b) grab(ptr, b);
+        }
+        function ptrMove(e) {
+            if (e.target.closest && e.target.closest('button, .overlay, #remote-back-btn') && !ptr.carry) return;
+            ptr.x = e.clientX; ptr.y = e.clientY; ptr.active = ptr.carry ? true : (e.pointerType === 'mouse');
+            lastPointerT = performance.now();
+        }
+        function ptrUp() {
+            if (ptr.carry) {
+                const b = ptr.carry, i = slotUnder(b);
+                if (i >= 0 && slots[i].ch !== b.ch) mistake(ptr);
+                else release(ptr);
+            }
+            ptr.active = ptr.active && false;
+        }
+        window.addEventListener('pointerdown', ptrDown);
+        window.addEventListener('pointermove', ptrMove);
+        window.addEventListener('pointerup', ptrUp);
+        window.addEventListener('pointercancel', ptrUp);
+
+        /* ---------------- منطق اللعب ---------------- */
+        function pickWords(L) {
+            const pool = [];
+            L.lens.forEach(n => BANK[n].forEach(x => pool.push(x)));
+            for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+            pool.sort((a, b) => (usedWords.has(a[0]) ? 1 : 0) - (usedWords.has(b[0]) ? 1 : 0));
+            return pool.slice(0, L.words).map(([word, pic, cat]) => ({ word, pic, cat }));
+        }
+
+        function startLevel(i) {
+            level = i;
+            const L = LEVELS[i];
+            words = pickWords(L);
+            wordIdx = 0; mistakes = 0; timeLeft = L.time; startedAt = performance.now();
+            particles = []; usedWords.clear();
+            state = 'PLAY';
+            setWord(0);
+        }
+
+        function setWord(i) {
+            const L = LEVELS[level];
+            wordIdx = i;
+            cur = words[i];
+            usedWords.add(cur.word);
+            cursors.forEach(c => { c.carry = null; c.dwellB = null; c.dwell = 0; });
+            const letters = cur.word.split('');
+            slots = letters.map(ch => ({ ch, filled: false, x: 0, y: 0, size: slotSize }));
+            // الحروف العائمة: حروف الكلمة + حروف مشتتة لا تنتمي إليها
+            const extras = [];
+            const pool = EXTRA_LETTERS.split('').filter(c => !letters.includes(c));
+            for (let k = 0; k < L.extra; k++) extras.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+            layout();
+            bubbles = letters.concat(extras).map(ch => newBubble(ch, L));
+            idleT = 0;
+            memoryUntil = L.hint === 'memory' ? performance.now() + MEMORY_MS : 0;
+        }
+
+        function newBubble(ch, L) {
+            const ang = Math.random() * Math.PI * 2, sp = (45 + Math.random() * 25) * L.speed * S;
+            return {
+                ch, r: R, carrier: null,
+                x: R + Math.random() * Math.max(1, w - 2 * R),
+                y: fieldTop + R + Math.random() * Math.max(1, fieldBottom - fieldTop - 2 * R),
+                vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, hue: Math.floor(Math.random() * 360)
+            };
+        }
+
+        function bubbleAt(x, y, pad) {
+            let best = null, bd = 1e9;
+            bubbles.forEach(b => {
+                if (b.carrier) return;
+                const d = Math.hypot(b.x - x, b.y - y);
+                if (d < b.r + (pad || 0) && d < bd) { bd = d; best = b; }
+            });
+            return best;
+        }
+        function slotUnder(b) {
+            for (let i = 0; i < slots.length; i++) {
+                const s = slots[i];
+                if (!s.filled && Math.hypot(b.x - s.x, b.y - s.y) < s.size * 0.62) return i;
+            }
+            return -1;
+        }
+
+        function grab(c, b) {
+            c.carry = b; b.carrier = c; c.carryT = 0; c.dwell = 0; c.dwellB = null; c.wrongT = 0;
+            GC.beep(600, 0.08, 'sine', 0.15);
+        }
+        function release(c) {
+            const b = c.carry;
+            if (b) {
+                b.carrier = null;
+                const a = Math.random() * 6.28, sp = 60 * S * LEVELS[level].speed;
+                b.vx = Math.cos(a) * sp; b.vy = Math.sin(a) * sp;
+                if (b.y < fieldTop + R) b.y = fieldTop + R;
+            }
+            c.carry = null; c.wrongT = 0;
+        }
+        function mistake(c) {
+            const b = c.carry;
+            release(c);
+            if (b) { b.vy = Math.abs(b.vy) + 160 * S; b.y = Math.max(b.y, fieldTop + R); }
+            mistakes++;
+            flash = 0.35; flashColor = '255,80,80';
+            GC.beep(180, 0.3, 'sawtooth', 0.18, 0, 90);
+            GC.vibrate(100);
+            if (mistakes >= MAX_MISTAKES) endLevel(false, 'mistakes');
+        }
+        function place(c, b, i) {
+            slots[i].filled = true;
+            bubbles.splice(bubbles.indexOf(b), 1);
+            c.carry = null; c.wrongT = 0;
+            idleT = 0;
+            burst(slots[i].x, slots[i].y, '#5eead4', 12);
+            GC.beep(700 + i * 90, 0.12, 'triangle', 0.18);
+            if (slots.every(s => s.filled)) wordDone();
+        }
+
+        function wordDone() {
+            state = 'WORD_DONE';
+            doneUntil = performance.now() + 2200;
+            flash = 0.25; flashColor = '94,234,212';
+            for (let i = 0; i < 5; i++) burst(w * (0.2 + 0.15 * i), h * 0.3, ['#facc15', '#5eead4', '#f472b6', '#38bdf8'][i % 4], 14);
+            [523, 659, 784, 1047].forEach((f, i) => GC.beep(f, 0.2, 'triangle', 0.16, i * 0.1));
+            speak(cur.word);
+        }
+
+        function speak(t) {
+            try {
+                if (!window.speechSynthesis) return;
+                speechSynthesis.cancel();
+                const u = new SpeechSynthesisUtterance(t);
+                u.lang = 'ar-SA'; u.rate = 0.85;
+                speechSynthesis.speak(u);
+            } catch (e) { /* تجاهل */ }
+        }
+
+        function burst(x, y, color, n) {
+            for (let i = 0; i < n; i++) particles.push({ x, y, color, vx: (Math.random() - 0.5) * 9, vy: (Math.random() - 0.7) * 9, life: 1, size: 3 + Math.random() * 4 });
+        }
+
+        function stars() { return mistakes === 0 ? 3 : mistakes <= 2 ? 2 : 1; }
+
+        function endLevel(win, why) {
+            state = 'END';
+            cursors.forEach(c => { c.carry = null; });
+            if (win) {
+                const st = stars();
+                const key = 'wb_stars_' + level;
+                if (st > GC.store.get(key)) GC.store.set(key, st);
+                if (level + 1 < LEVELS.length && unlocked < level + 2) { unlocked = level + 2; GC.store.set('wb_unlocked', unlocked); }
+                const last = level === LEVELS.length - 1;
+                selected = last ? 0 : level + 1;
+                overlayKind = last ? 'done' : 'win';
+                titleEl.textContent = last ? 'أنت بطل الكلمات! 🏆' : 'أحسنت! أتممت المستوى 🎉';
+                titleEl.style.color = '#5eead4';
+                descEl.innerHTML = `${'⭐'.repeat(st)}${'☆'.repeat(3 - st)}<br>الكلمات التي تعلّمتها: ${words.map(x => x.pic + ' ' + x.word).join(' ، ')}`;
+                [523, 659, 784, 1047, 1319].forEach((f, i) => GC.beep(f, 0.2, 'triangle', 0.16, i * 0.11));
+            } else {
+                selected = level;
+                overlayKind = 'lose';
+                titleEl.textContent = why === 'time' ? 'انتهى الوقت! ⏱️' : 'كثرت الأخطاء! ❌';
+                titleEl.style.color = '#fb7185';
+                descEl.innerHTML = 'لا بأس، حاول مرة أخرى — ركّز على الحرف الصحيح لكل مكان.';
+                [330, 262, 196].forEach((f, i) => GC.beep(f, 0.25, 'square', 0.12, i * 0.15));
+            }
+            showMenu();
+        }
+
+        /* ---------------- القائمة ---------------- */
+        function showMenu() {
+            loader.classList.add('hidden');
+            levelsEl.classList.remove('hidden');
+            startBtn.classList.remove('hidden');
+            levelsEl.innerHTML = '';
+            LEVELS.forEach((L, i) => {
+                const b = document.createElement('button');
+                const locked = i >= unlocked;
+                const st = GC.store.get('wb_stars_' + i);
+                b.className = 'lv' + (i === selected ? ' sel' : '');
+                b.disabled = locked;
+                b.innerHTML = (locked ? '🔒' : (i + 1)) + `<small>${locked ? '' : '⭐'.repeat(st)}</small>`;
+                b.addEventListener('click', () => { selected = i; showMenu(); });
+                levelsEl.appendChild(b);
+            });
+            const lbl = { start: 'ابدأ', win: 'المستوى التالي', done: 'العب من جديد', lose: 'حاول مرة أخرى' }[overlayKind];
+            startBtn.textContent = `${lbl}: ${selected + 1} - ${LEVELS[selected].name}`;
+            overlay.classList.remove('hidden');
+        }
+        startBtn.addEventListener('click', () => {
+            GC.audioInit();
+            overlay.classList.add('hidden');
+            startLevel(selected);
+            lastT = performance.now();
+        });
+
+        /* ---------------- التحديث ---------------- */
+        function update(now) {
+            const dt = Math.min((now - lastT) / 1000, 0.05);
+            lastT = now;
+            if (flash > 0) flash -= dt;
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life -= dt * 1.3;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+            // الإصبع/الفأرة تبقى فعّالة لحظات بعد آخر حركة فقط
+            if (ptr.active && !ptr.carry && now - lastPointerT > 2500) ptr.active = false;
+
+            if (state === 'WORD_DONE') {
+                if (now >= doneUntil) {
+                    if (wordIdx + 1 >= words.length) endLevel(true);
+                    else { state = 'PLAY'; setWord(wordIdx + 1); }
+                }
+                return;
+            }
+            if (state !== 'PLAY') return;
+
+            const L = LEVELS[level];
+            if (L.time) {
+                timeLeft -= dt;
+                if (timeLeft <= 0) { timeLeft = 0; endLevel(false, 'time'); return; }
+            }
+            idleT += dt;
+
+            // حركة الحروف العائمة
+            bubbles.forEach(b => {
+                if (b.carrier) return;
+                b.x += b.vx * dt; b.y += b.vy * dt;
+                if (b.x < b.r) { b.x = b.r; b.vx = Math.abs(b.vx); }
+                if (b.x > w - b.r) { b.x = w - b.r; b.vx = -Math.abs(b.vx); }
+                if (b.y < fieldTop + b.r) { b.y = fieldTop + b.r; b.vy = Math.abs(b.vy); }
+                if (b.y > fieldBottom - b.r) { b.y = fieldBottom - b.r; b.vy = -Math.abs(b.vy); }
+            });
+
+            cursors.forEach(c => {
+                if (!c.active) {
+                    c.dwellB = null; c.dwell = 0;
+                    if (c.carry && c.type === 'hand') { c.lost += dt; if (c.lost > 0.8) release(c); }
+                    return;
+                }
+                if (c.carry) {
+                    const b = c.carry;
+                    const f = Math.min(1, dt * 16);
+                    b.x += (c.x - b.x) * f; b.y += (c.y - b.y) * f;
+                    c.carryT += dt;
+                    if (c.type === 'hand' && c.carryT > 6) { release(c); return; }
+                    const i = slotUnder(b);
+                    if (i >= 0 && slots[i].ch === b.ch) { place(c, b, i); return; }
+                    if (i >= 0 && c.type === 'hand') {
+                        c.wrongT += dt;
+                        if (c.wrongT > 0.5) mistake(c);
+                    } else c.wrongT = 0;
+                } else if (c.type === 'hand') {
+                    const b = bubbleAt(c.x, c.y, 10);
+                    if (b && b === c.dwellB) {
+                        c.dwell += dt;
+                        if (c.dwell >= DWELL) grab(c, b);
+                    } else { c.dwellB = b; c.dwell = 0; }
+                }
+            });
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function roundRect(x, y, ww, hh, r) { ctx.beginPath(); ctx.roundRect(x, y, ww, hh, r); }
+
+        function drawHud() {
+            const L = LEVELS[level];
+            const fs = Math.max(14, Math.min(w * 0.04, 24));
+            ctx.textBaseline = 'middle';
+            ctx.font = `bold ${fs}px Tahoma`;
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#5eead4';
+            ctx.fillText(`المستوى ${level + 1}: ${L.name}`, w - 12, hudH * 0.32);
+            ctx.font = `${fs * 0.8}px Tahoma`;
+            ctx.fillStyle = '#cbe7ee';
+            ctx.fillText(`الكلمة ${Math.min(wordIdx + 1, words.length)} من ${words.length}`, w - 12, hudH * 0.74);
+            ctx.font = `bold ${fs}px Tahoma`;
+            ctx.textAlign = 'left';
+            let hearts = '';
+            for (let i = 0; i < MAX_MISTAKES; i++) hearts += i < MAX_MISTAKES - mistakes ? '❤️' : '🖤';
+            ctx.font = `${fs * 0.8}px Arial`;
+            ctx.fillText(hearts, 12, hudH * 0.35);
+            if (L.time) {
+                ctx.font = `bold ${fs}px Tahoma`;
+                ctx.fillStyle = timeLeft < 15 ? '#fb7185' : '#facc15';
+                ctx.fillText(`⏱ ${Math.ceil(timeLeft)}`, 12, hudH * 0.78);
+            }
+        }
+
+        function drawPicture(now) {
+            const L = LEVELS[level];
+            const cy = hudH + picH * 0.45;
+            const memoryShown = L.hint === 'memory' && now < memoryUntil;
+            const showPic = L.hint === 'word' || L.hint === 'pic' || memoryShown;
+            const showWord = L.hint === 'word' || memoryShown || state === 'WORD_DONE';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            if (showPic || state === 'WORD_DONE') {
+                ctx.font = `${picH * 0.62}px Arial`;
+                ctx.fillStyle = '#fff';
+                ctx.fillText(cur.pic, w / 2, cy);
+            } else {
+                ctx.font = `bold ${picH * 0.5}px Tahoma`;
+                ctx.fillStyle = '#facc15';
+                ctx.fillText('❓', w / 2, cy);
+            }
+            const fs = Math.max(18, Math.min(picH * 0.3, w * 0.07));
+            ctx.font = `bold ${fs}px Tahoma`;
+            if (showWord) {
+                ctx.fillStyle = state === 'WORD_DONE' ? '#5eead4' : 'rgba(255,255,255,0.85)';
+                ctx.fillText(cur.word, w / 2, hudH + picH * 0.9);
+                if (memoryShown) {
+                    ctx.fillStyle = '#facc15';
+                    ctx.font = `${fs * 0.55}px Tahoma`;
+                    ctx.fillText(`احفظها! ${Math.ceil((memoryUntil - now) / 1000)}`, w / 2, hudH + picH * 1.05 - fs * 0.1);
+                }
+            } else {
+                ctx.fillStyle = '#9fd3dc';
+                ctx.fillText(`${cur.cat} • ${cur.word.length} أحرف`, w / 2, hudH + picH * 0.9);
+            }
+        }
+
+        function drawSlots() {
+            slots.forEach(s => {
+                const x = s.x - s.size / 2, y = s.y - s.size / 2;
+                roundRect(x, y, s.size, s.size, s.size * 0.22);
+                if (s.filled) {
+                    ctx.fillStyle = 'rgba(94,234,212,0.25)'; ctx.fill();
+                    ctx.strokeStyle = '#5eead4'; ctx.lineWidth = 3; ctx.stroke();
+                    ctx.fillStyle = '#fff'; ctx.font = `bold ${s.size * 0.62}px Arial`;
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.fillText(s.ch, s.x, s.y + s.size * 0.04);
+                } else {
+                    ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fill();
+                    ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2;
+                    ctx.setLineDash([6, 5]); ctx.stroke(); ctx.setLineDash([]);
+                }
+            });
+        }
+
+        function drawBubble(b, now, glow) {
+            const g = ctx.createRadialGradient(b.x - b.r * 0.3, b.y - b.r * 0.35, b.r * 0.1, b.x, b.y, b.r);
+            g.addColorStop(0, `hsl(${b.hue},85%,72%)`);
+            g.addColorStop(1, `hsl(${b.hue},70%,38%)`);
+            ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7);
+            ctx.fillStyle = g;
+            ctx.shadowColor = glow ? '#facc15' : `hsl(${b.hue},90%,60%)`;
+            ctx.shadowBlur = glow ? 26 + 8 * Math.sin(now / 120) : 12;
+            ctx.fill(); ctx.shadowBlur = 0;
+            ctx.lineWidth = glow ? 4 : 2; ctx.strokeStyle = glow ? '#facc15' : 'rgba(255,255,255,0.8)'; ctx.stroke();
+            ctx.fillStyle = '#fff'; ctx.font = `bold ${b.r * 1.3}px Arial`;
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(b.ch, b.x, b.y + b.r * 0.06);
+        }
+
+        function draw(now) {
+            GC.begin(ctx);
+            ctx.clearRect(0, 0, w, h);
+            if (state === 'MENU' || !cur) return;
+            if (flash > 0) { ctx.fillStyle = `rgba(${flashColor},${Math.min(0.25, flash)})`; ctx.fillRect(0, 0, w, h); }
+
+            // منطقة الحروف
+            roundRect(8, fieldTop - 6, w - 16, fieldBottom - fieldTop + 12, 18);
+            ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.fill();
+
+            drawHud();
+            drawPicture(now);
+            drawSlots();
+
+            // تلميح بعد فترة تردد: يتوهج الحرف المطلوب
+            let hintCh = null;
+            if (idleT > 12 && state === 'PLAY') { const s = slots.find(x => !x.filled); if (s) hintCh = s.ch; }
+            const hinted = hintCh && bubbles.find(b => b.ch === hintCh && !b.carrier);
+            bubbles.forEach(b => { if (!b.carrier) drawBubble(b, now, b === hinted); });
+            bubbles.forEach(b => { if (b.carrier) drawBubble(b, now, false); });
+
+            // المؤشرات وحلقة الالتقاط
+            cursors.forEach(c => {
+                if (!c.active) return;
+                if (c.type === 'hand' && c.dwellB && !c.carry) {
+                    ctx.beginPath(); ctx.arc(c.dwellB.x, c.dwellB.y, c.dwellB.r + 7, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, c.dwell / DWELL));
+                    ctx.strokeStyle = c.color; ctx.lineWidth = 5; ctx.stroke();
+                }
+                ctx.beginPath(); ctx.arc(c.x, c.y, c.carry ? 8 : 14, 0, 7);
+                ctx.fillStyle = c.color + (c.carry ? 'ff' : '99'); ctx.fill();
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+            });
+
+            particles.forEach(p => { ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 7); ctx.fill(); });
+            ctx.globalAlpha = 1;
+
+            if (state === 'WORD_DONE') {
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.font = `bold ${Math.max(26, Math.min(w * 0.09, 56))}px Tahoma`;
+                ctx.fillStyle = '#fff'; ctx.shadowColor = '#5eead4'; ctx.shadowBlur = 20;
+                ctx.fillText('أحسنت! 👏', w / 2, fieldTop + (fieldBottom - fieldTop) * 0.45);
+                ctx.shadowBlur = 0;
+            } else if (state === 'PLAY' && !cursors.some(c => c.active)) {
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.font = `bold ${Math.max(14, Math.min(w * 0.04, 22))}px Tahoma`;
+                ctx.fillStyle = 'rgba(255,140,140,0.95)';
+                ctx.fillText('ارفع يديك أمام الكاميرا أو المس الشاشة', w / 2, fieldBottom - 24);
+            }
+        }
+
+        function loop(now) {
+            update(now);
+            draw(now);
+            requestAnimationFrame(loop);
+        }
+
+        /* ---------------- الكاميرا ---------------- */
+        function ready(msg, failed) {
+            loader.classList.add('hidden');
+            titleEl.textContent = 'بنّاء الكلمات';
+            descEl.innerHTML = msg;
+            overlayKind = 'start';
+            showMenu();
+        }
+        const HELP = 'ركّب الكلمة من الحروف العائمة: <b>ثبّت يدك فوق الحرف لحظة</b> فيلتصق بها، ثم <b>انقله إلى مكانه الصحيح</b>. يمكنك استخدام <b>يديك الاثنتين</b> معاً!';
+
+        async function initCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof Hands === 'undefined') {
+                ready(HELP + '<br>الكاميرا غير متاحة — اسحب الحروف بإصبعك أو بالفأرة.', true);
+                return;
+            }
+            try {
+                const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+                const mobile = /Android|iPhone|iPad|Mobi/i.test(navigator.userAgent);
+                hands.setOptions({ maxNumHands: 2, modelComplexity: mobile ? 0 : 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+                hands.onResults((r) => {
+                    // يعمل المؤشر اليدوي فقط حين لا يستخدم اللاعب إصبعه/الفأرة
+                    if (performance.now() - lastPointerT < 1500 && ptr.active) return;
+                    const m = 0.1, cl = (v) => Math.max(0, Math.min(1, (v - m) / (1 - 2 * m)));
+                    const pts = (r.multiHandLandmarks || []).map(lm => ({ x: cl(1 - lm[9].x) * w, y: cl(lm[9].y) * h }));
+                    onHands(pts);
+                });
+                await GC.startCamera(video, hands);
+                ready(HELP, false);
+            } catch (e) {
+                console.error(e);
+                ready(HELP + '<br>تعذر تشغيل الكاميرا — اسحب الحروف بإصبعك أو بالفأرة.', true);
+            }
+        }
+
+        requestAnimationFrame(loop);
+        initCamera();
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

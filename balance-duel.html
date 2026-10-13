@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>ميزان التحدي</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="game-common.js"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+            background: #10263a; color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; -webkit-user-select: none; user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0.22; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+        .overlay {
+            position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; text-align: center;
+            background: rgba(8, 20, 33, 0.94); padding: 16px; overflow-y: auto;
+        }
+        .overlay > * { flex-shrink: 0; }
+        h1 { margin: 0 0 8px; font-size: clamp(1.8rem, 7vw, 3rem); color: #fbbf24; text-shadow: 0 0 14px rgba(251, 191, 36, 0.55); }
+        p { margin: 0 0 14px; max-width: 580px; line-height: 1.7; color: #cfe3f2; font-size: clamp(0.95rem, 3.5vw, 1.15rem); }
+        button {
+            font-family: inherit; cursor: pointer; border: 2px solid #fbbf24; color: #fff;
+            background: #b45309; border-radius: 50px; padding: 12px 40px;
+            font-size: clamp(1.1rem, 4.5vw, 1.4rem); box-shadow: 0 0 16px rgba(251, 191, 36, 0.4);
+        }
+        button:active { transform: scale(0.97); }
+        .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 0 0 14px; }
+        .opt { padding: 8px 18px; font-size: 1.05rem; background: #16384f; box-shadow: none; border-color: transparent; border-radius: 14px; }
+        .opt small { display: block; font-size: 0.7rem; opacity: 0.85; }
+        .opt.sel { background: #fbbf24; color: #3a2400; }
+        .hidden { display: none !important; }
+        .loader { border: 5px solid rgba(255,255,255,0.1); border-top-color: #fbbf24; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 14px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-height: 460px) { h1 { margin-bottom: 2px; } p { margin-bottom: 6px; } .row { margin-bottom: 6px; } button { padding: 8px 26px; } .opt { padding: 4px 14px; } }
+    </style>
+</head>
+<body>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+    <div id="overlay" class="overlay">
+        <div id="loader" class="loader"></div>
+        <h1 id="title">⚖️ ميزان التحدي</h1>
+        <p id="desc">جاري تشغيل الكاميرا...</p>
+        <div id="modeRow" class="row hidden">
+            <button class="opt sel" data-mode="2p">👥 لاعبان<small>وجهاً لوجه</small></button>
+            <button class="opt" data-mode="cpu">🤖 ضد الحاسوب<small>للاعب واحد</small></button>
+        </div>
+        <div id="levelRow" class="row hidden"></div>
+        <button id="startBtn" class="hidden">ابدأ التحدي</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('video');
+        const overlay = document.getElementById('overlay');
+        const titleEl = document.getElementById('title');
+        const descEl = document.getElementById('desc');
+        const loader = document.getElementById('loader');
+        const modeRow = document.getElementById('modeRow');
+        const levelRow = document.getElementById('levelRow');
+        const startBtn = document.getElementById('startBtn');
+
+        /* ---------------- المستويات الثلاثة ----------------
+           len: طول اللوح (نسبة من العرض) | len2: طوله النهائي (يتقلص مع الوقت) | G: شدة انزلاق الكرة
+           nudge: قوة الهزات العشوائية | wind: الرياح | balls: عدد الكرات | rate: سرعة الحاسوب ودقته */
+        const LEVELS = [
+            { name: 'المبتدئ', sub: 'لوح عريض', len: 0.72, len2: 0.72, G: 1.0, nudge: 0.14, wind: 0,   balls: 1, rate: 1.6, noise: 0.10 },
+            { name: 'المتوسط', sub: 'رياح وهزات', len: 0.60, len2: 0.60, G: 1.4, nudge: 0.18, wind: 0.5, balls: 1, rate: 2.4, noise: 0.06 },
+            { name: 'الخبير',  sub: 'لوح يضيق وكرتان', len: 0.54, len2: 0.40, G: 1.8, nudge: 0.26, wind: 0.8, balls: 2, rate: 3.2, noise: 0.03 }
+        ];
+        const WIN_SCORE = 3;
+        const THMAX = 0.38;          // أقصى ميلان (راديان)
+        const COLORS = ['#f472b6', '#38bdf8'];
+        const FACES = ['😎', '🤓'];
+
+        let mode = '2p', selected = 0, level = 0;
+        let phase = 'MENU';          // MENU, READY, PLAY, POINT, END
+        let score = [0, 0];
+        let t = 0, phaseUntil = 0, msg = '';
+        let balls = [], falling = [], particles = [];
+        let theta = 0, nudgeT = 0, gust = { until: 0, dir: 0, next: 0 };
+        let lastT = performance.now();
+        let w = 0, h = 0, S = 1, Lpx = 400, amp = 90, pivot = { x: 0, y: 0 }, groundY = 0;
+        let cameraOK = false, lastHandT = [0, 0];
+
+        // اللاعبون: h = ارتفاع الطرف (0 = أعلى، 1 = أسفل)
+        const P = [{ h: 0.5, target: 0.5, active: false, src: 'none' }, { h: 0.5, target: 0.5, active: false, src: 'none' }];
+
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; layout(); });
+
+        function curLen() {
+            const L = LEVELS[level];
+            return L.len + (L.len2 - L.len) * Math.min(1, t / 40);
+        }
+        function layout() {
+            S = Math.max(0.55, Math.min(1.5, Math.min(w, h * 1.3) / 700));
+            const maxL = Math.min(w - 130 * S, 900);
+            Lpx = maxL * curLen() / 0.72;
+            amp = Lpx * 0.26;
+            pivot = { x: w / 2, y: h * 0.55 };
+            groundY = Math.min(h * 0.92, pivot.y + Math.max(200 * S, Lpx * 0.75));
+        }
+
+        /* ---------------- المدخلات ---------------- */
+        const pointers = new Map();
+        function sideOf(x) { return mode === 'cpu' ? 0 : (x < w / 2 ? 0 : 1); }
+        function ptrEvt(e, down) {
+            if (e.target.closest && e.target.closest('button, .overlay, #remote-back-btn')) return;
+            if (down === false) { pointers.delete(e.pointerId); return; }
+            if (e.pointerType !== 'mouse' || true) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
+        }
+        window.addEventListener('pointerdown', (e) => ptrEvt(e, true));
+        window.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' || pointers.has(e.pointerId)) ptrEvt(e, true); });
+        window.addEventListener('pointerup', (e) => ptrEvt(e, false));
+        window.addEventListener('pointercancel', (e) => ptrEvt(e, false));
+
+        let handPts = [];   // نقاط الأيدي من الكاميرا (إحداثيات الشاشة)
+        function readInputs(now) {
+            const got = [false, false];
+            // الأصابع/الفأرة لها الأولوية
+            pointers.forEach((p) => {
+                if (now - p.t > 2500) return;
+                const s = sideOf(p.x);
+                P[s].target = Math.max(0, Math.min(1, (p.y - h * 0.2) / (h * 0.6)));
+                P[s].src = 'pointer'; got[s] = true; lastHandT[s] = now;
+            });
+            // الأيدي: كل يد حسب نصف الشاشة التي تقع فيه
+            handPts.forEach((p) => {
+                const s = sideOf(p.x);
+                if (got[s]) return;
+                P[s].target = Math.max(0, Math.min(1, (p.ny - 0.18) / 0.64));
+                P[s].src = 'hand'; got[s] = true; lastHandT[s] = now;
+            });
+            for (let i = 0; i < 2; i++) P[i].active = got[i] || (now - lastHandT[i] < 700);
+        }
+
+        /* ---------------- الكرات ---------------- */
+        function newRound() {
+            const L = LEVELS[level];
+            balls = [];
+            for (let i = 0; i < L.balls; i++) {
+                balls.push({ s: L.balls === 1 ? 0 : (i === 0 ? -0.12 : 0.12), v: (Math.random() - 0.5) * 0.15 });
+            }
+            falling = []; t = 0; theta = 0; nudgeT = 1.5;
+            gust = { until: 0, dir: 0, next: 4 };
+            P.forEach(p => { p.h = 0.5; p.target = 0.5; });
+        }
+
+        function startRound(now) {
+            newRound();
+            phase = 'READY';
+            phaseUntil = now + 2700;
+            msg = '';
+        }
+
+        function startMatch() {
+            GC.audioInit();
+            level = selected;
+            score = [0, 0];
+            overlay.classList.add('hidden');
+            layout();
+            startRound(performance.now());
+            lastT = performance.now();
+        }
+
+        /* ---------------- المحاكاة ---------------- */
+        function boardAngle() {
+            const yL = (P[0].h - 0.5) * 2 * amp, yR = (P[1].h - 0.5) * 2 * amp;
+            return Math.max(-THMAX, Math.min(THMAX, Math.atan2(yR - yL, Lpx)));
+        }
+
+        function aiUpdate(dt, now) {
+            if (mode !== 'cpu') return;
+            const L = LEVELS[level];
+            P[1].active = true;
+            let thetaDes = 0;
+            if (phase === 'PLAY' && balls.length) {
+                const b = balls.reduce((a, c) => (c.s > a.s ? c : a));
+                const urgency = Math.max(0, Math.min(1, (b.s + 0.1) / 0.6));
+                thetaDes = -(0.2 + 0.8 * urgency) * THMAX;
+                if (b.v < -0.5) thetaDes *= 0.4;
+                thetaDes += (Math.random() - 0.5) * 2 * L.noise;
+            }
+            const hDes = Math.max(0, Math.min(1, P[0].h + (Lpx * Math.tan(thetaDes)) / (2 * amp)));
+            const d = hDes - P[1].h, step = L.rate * dt;
+            P[1].h += Math.max(-step, Math.min(step, d));
+            P[1].target = P[1].h;
+        }
+
+        function update(now) {
+            const dt = Math.min((now - lastT) / 1000, 0.05);
+            lastT = now;
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx; p.y += p.vy; p.vy += 0.2; p.life -= dt * 1.2;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+            if (phase === 'MENU') return;
+            readInputs(now);
+            // تنعيم ارتفاع الطرفين
+            for (let i = 0; i < 2; i++) {
+                if (i === 1 && mode === 'cpu') continue;
+                P[i].h += (P[i].target - P[i].h) * Math.min(1, dt * 12);
+            }
+            aiUpdate(dt, now);
+            const th = boardAngle();
+            theta += (th - theta) * Math.min(1, dt * 14);
+
+            falling.forEach(f => { f.vy += 1500 * S * dt; f.x += f.vx * dt; f.y += f.vy * dt; });
+            falling = falling.filter(f => f.y < h + 60);
+
+            if (phase === 'READY') {
+                if (now >= phaseUntil) { phase = 'PLAY'; GC.beep(880, 0.25, 'square', 0.14); }
+                else if (Math.ceil((phaseUntil - now) / 900) !== Math.ceil((phaseUntil - now - dt * 1000) / 900)) GC.beep(440, 0.1, 'square', 0.1);
+                return;
+            }
+            if (phase === 'POINT') {
+                if (now >= phaseUntil) {
+                    if (score[0] >= WIN_SCORE || score[1] >= WIN_SCORE) endMatch();
+                    else startRound(now);
+                }
+                return;
+            }
+            if (phase !== 'PLAY') return;
+
+            const L = LEVELS[level];
+            t += dt;
+            layout();
+            const gEsc = 1 + 0.05 * t;                 // الانزلاق يزداد مع الوقت
+            // الرياح
+            if (L.wind && t > gust.next) { gust = { until: t + 1.2, dir: Math.random() < 0.5 ? -1 : 1, next: t + 3 + Math.random() * 3 }; }
+            const windAcc = L.wind && t < gust.until ? gust.dir * L.wind * 0.6 : 0;
+            // هزات عشوائية تكسر التعادل
+            nudgeT -= dt;
+            let nudge = 0;
+            if (nudgeT <= 0) { nudge = (Math.random() - 0.5) * 2 * L.nudge * (1 + t / 20); nudgeT = 1.2 + Math.random() * 1.8; }
+
+            for (const b of balls) {
+                b.v += (L.G * gEsc * Math.sin(theta) + windAcc) * dt + nudge;
+                b.v *= Math.exp(-0.5 * dt);
+                b.s += b.v * dt;
+            }
+            for (const b of balls) {
+                if (Math.abs(b.s) > 0.5) { pointFor(b.s > 0 ? 0 : 1, b, now); return; }
+            }
+        }
+
+        function ballWorld(b) {
+            const c = Math.cos(theta), s = Math.sin(theta);
+            const r = ballR();
+            const lx = b.s * Lpx, ly = -(7 * S + r);
+            return { x: pivot.x + lx * c - ly * s, y: pivot.y + lx * s + ly * c };
+        }
+        function ballR() { return Math.max(11, Lpx * 0.04); }
+
+        function pointFor(winner, ball, now) {
+            const wp = ballWorld(ball);
+            const tangent = ball.v * Lpx;
+            falling.push({ x: wp.x, y: wp.y, vx: tangent * Math.cos(theta), vy: tangent * Math.sin(theta) });
+            balls = balls.filter(b => b !== ball);
+            balls.forEach(b => { falling.push(Object.assign({ vx: 0, vy: 0 }, ballWorld(b))); });
+            balls = [];
+            score[winner]++;
+            phase = 'POINT';
+            phaseUntil = now + 2000;
+            const name = mode === 'cpu' ? (winner === 0 ? 'أنت' : 'الحاسوب') : `اللاعب ${winner + 1}`;
+            msg = `نقطة لـ ${name}! 🎉`;
+            for (let i = 0; i < 24; i++) particles.push({ x: pivot.x + (winner === 0 ? 1 : -1) * Lpx / 2, y: pivot.y, color: COLORS[winner], vx: (Math.random() - 0.5) * 9, vy: -Math.random() * 9, life: 1, size: 3 + Math.random() * 4 });
+            [523, 659, 784].forEach((f, i) => GC.beep(f, 0.15, 'triangle', 0.15, i * 0.08));
+            GC.vibrate(60);
+        }
+
+        function endMatch() {
+            phase = 'END';
+            const winner = score[0] > score[1] ? 0 : 1;
+            const name = mode === 'cpu' ? (winner === 0 ? 'أنت فزت! 🏆' : 'الحاسوب فاز 🤖') : `اللاعب ${winner + 1} يفوز! 🏆`;
+            titleEl.textContent = name;
+            descEl.innerHTML = `النتيجة: ${score[0]} - ${score[1]}`;
+            [523, 659, 784, 1047].forEach((f, i) => GC.beep(f, 0.22, 'triangle', 0.16, i * 0.12));
+            if (mode === 'cpu' && winner === 0 && level < LEVELS.length - 1) selected = level + 1;
+            startBtn.textContent = 'تحدٍّ جديد';
+            showMenu();
+        }
+
+        /* ---------------- القائمة ---------------- */
+        function showMenu() {
+            loader.classList.add('hidden');
+            modeRow.classList.remove('hidden');
+            levelRow.classList.remove('hidden');
+            startBtn.classList.remove('hidden');
+            levelRow.innerHTML = '';
+            LEVELS.forEach((L, i) => {
+                const b = document.createElement('button');
+                b.className = 'opt' + (i === selected ? ' sel' : '');
+                b.innerHTML = `${i + 1}. ${L.name}<small>${L.sub}</small>`;
+                b.addEventListener('click', () => { selected = i; showMenu(); });
+                levelRow.appendChild(b);
+            });
+            modeRow.querySelectorAll('.opt').forEach(b => b.classList.toggle('sel', b.dataset.mode === mode));
+            overlay.classList.remove('hidden');
+        }
+        modeRow.addEventListener('click', (e) => {
+            const b = e.target.closest('.opt');
+            if (!b) return;
+            mode = b.dataset.mode;
+            showMenu();
+        });
+        startBtn.addEventListener('click', startMatch);
+
+        /* ---------------- الرسم ---------------- */
+        function rot(x, y) { const c = Math.cos(theta), s = Math.sin(theta); return { x: pivot.x + x * c - y * s, y: pivot.y + x * s + y * c }; }
+
+        function drawScene(now) {
+            // السماء والأرض
+            const g = ctx.createLinearGradient(0, 0, 0, h);
+            g.addColorStop(0, 'rgba(25,60,95,0.55)'); g.addColorStop(1, 'rgba(10,25,40,0.7)');
+            ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = 'rgba(34,110,70,0.75)';
+            ctx.fillRect(0, groundY, w, h - groundY);
+            ctx.fillStyle = 'rgba(255,255,255,0.05)';
+            ctx.fillRect(w / 2 - 1, 0, 2, groundY);
+
+            // قاعدة الميزان
+            ctx.fillStyle = '#6b7280';
+            ctx.beginPath();
+            ctx.moveTo(pivot.x, pivot.y + 4); ctx.lineTo(pivot.x - 38 * S, groundY); ctx.lineTo(pivot.x + 38 * S, groundY);
+            ctx.closePath(); ctx.fill();
+
+            // اللاعبان
+            for (let i = 0; i < 2; i++) drawPlayer(i);
+
+            // اللوح
+            const a = rot(-Lpx / 2, 0), b = rot(Lpx / 2, 0);
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#92400e'; ctx.lineWidth = 16 * S;
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+            ctx.strokeStyle = '#d97706'; ctx.lineWidth = 9 * S;
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+            // علامتا الطرفين بلون كل لاعب
+            [[a, 0], [b, 1]].forEach(([p, i]) => { ctx.fillStyle = COLORS[i]; ctx.beginPath(); ctx.arc(p.x, p.y, 9 * S, 0, 7); ctx.fill(); });
+            ctx.fillStyle = '#374151'; ctx.beginPath(); ctx.arc(pivot.x, pivot.y, 10 * S, 0, 7); ctx.fill();
+        }
+
+        function drawPlayer(i) {
+            const end = i === 0 ? rot(-Lpx / 2, 0) : rot(Lpx / 2, 0);
+            const dirOut = i === 0 ? -1 : 1;
+            const bx = end.x + dirOut * 46 * S;               // موضع الجسم
+            const hipY = groundY - 4;
+            const shoulderY = Math.max(pivot.y + 40 * S, hipY - 110 * S);
+            ctx.lineCap = 'round'; ctx.strokeStyle = COLORS[i]; ctx.lineWidth = 7 * S;
+            ctx.globalAlpha = P[i].active || mode === 'cpu' && i === 1 ? 1 : 0.45;
+            // الجسم والرجلان
+            ctx.beginPath(); ctx.moveTo(bx, shoulderY); ctx.lineTo(bx, hipY - 34 * S);
+            ctx.moveTo(bx, hipY - 34 * S); ctx.lineTo(bx - 14 * S, hipY);
+            ctx.moveTo(bx, hipY - 34 * S); ctx.lineTo(bx + 14 * S, hipY);
+            // الذراع تصل إلى طرف اللوح
+            ctx.moveTo(bx, shoulderY + 6 * S); ctx.lineTo(end.x, end.y + 8 * S);
+            ctx.stroke();
+            ctx.font = `${44 * S}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(FACES[i], bx, shoulderY - 26 * S);
+            ctx.globalAlpha = 1;
+            // اسم اللاعب
+            ctx.font = `bold ${Math.max(13, 15 * S)}px Tahoma`;
+            ctx.fillStyle = COLORS[i];
+            const nm = mode === 'cpu' ? (i === 0 ? 'أنت' : 'الحاسوب') : `اللاعب ${i + 1}`;
+            ctx.fillText(nm, bx, hipY + 18 * S > h - 8 ? h - 8 : hipY + 16 * S);
+            if (phase !== 'MENU' && phase !== 'END' && !P[i].active && !(mode === 'cpu' && i === 1)) {
+                ctx.fillStyle = 'rgba(255,170,120,0.95)';
+                ctx.font = `bold ${Math.max(12, 14 * S)}px Tahoma`;
+                ctx.fillText('ارفع يدك ✋', bx, shoulderY - 62 * S);
+            }
+        }
+
+        function drawBall(x, y, r) {
+            const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, r * 0.15, x, y, r);
+            g.addColorStop(0, '#fff7d6'); g.addColorStop(1, '#f59e0b');
+            ctx.beginPath(); ctx.arc(x, y, r, 0, 7);
+            ctx.fillStyle = g; ctx.shadowColor = '#fbbf24'; ctx.shadowBlur = 14; ctx.fill(); ctx.shadowBlur = 0;
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+        }
+
+        function drawHud(now) {
+            const fs = Math.max(16, Math.min(w * 0.05, 30));
+            ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+            ctx.font = `bold ${fs * 1.6}px Arial`;
+            ctx.fillStyle = COLORS[0]; ctx.fillText(score[0], w / 2 - fs * 2.2, fs * 1.5);
+            ctx.fillStyle = COLORS[1]; ctx.fillText(score[1], w / 2 + fs * 2.2, fs * 1.5);
+            ctx.fillStyle = '#fff'; ctx.font = `bold ${fs}px Tahoma`;
+            ctx.fillText('—', w / 2, fs * 1.5);
+            ctx.font = `${fs * 0.65}px Tahoma`;
+            ctx.fillStyle = '#9fc5e0';
+            ctx.fillText(`المستوى ${level + 1}: ${LEVELS[level].name} • الأول إلى ${WIN_SCORE}`, w / 2, fs * 3);
+            // الرياح
+            const L = LEVELS[level];
+            if (phase === 'PLAY' && L.wind && t < gust.until) {
+                ctx.font = `bold ${fs}px Tahoma`; ctx.fillStyle = '#7dd3fc';
+                ctx.fillText(gust.dir > 0 ? 'رياح ⮕' : '⬅ رياح', w / 2, fs * 4.4);
+            }
+            // مؤشر الميلان
+            if (phase === 'PLAY' || phase === 'READY') {
+                const mw = Math.min(w * 0.5, 220), mx = w / 2 - mw / 2, my = h - 22;
+                ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(mx, my, mw, 6);
+                ctx.fillStyle = theta > 0 ? COLORS[1] : COLORS[0];
+                ctx.fillRect(w / 2, my, (theta / THMAX) * (mw / 2), 6);
+            }
+            ctx.textAlign = 'center';
+            if (phase === 'READY') {
+                const n = Math.ceil((phaseUntil - now) / 900);
+                ctx.font = `bold ${fs * 3}px Arial`; ctx.fillStyle = '#fbbf24'; ctx.shadowColor = '#000'; ctx.shadowBlur = 10;
+                ctx.fillText(n > 3 ? 'استعدّا!' : n, w / 2, h * 0.3);
+                ctx.shadowBlur = 0;
+                ctx.font = `${fs * 0.7}px Tahoma`; ctx.fillStyle = '#e5eefb';
+                ctx.fillText('ارفع طرفك لتدفع الكرة نحو خصمك — ولا تدعها تسقط من جهتك!', w / 2, h * 0.3 + fs * 2.4);
+            } else if (phase === 'POINT') {
+                ctx.font = `bold ${fs * 1.5}px Tahoma`; ctx.fillStyle = '#fff'; ctx.shadowColor = '#fbbf24'; ctx.shadowBlur = 16;
+                ctx.fillText(msg, w / 2, h * 0.3);
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        function draw(now) {
+            GC.begin(ctx);
+            ctx.clearRect(0, 0, w, h);
+            drawScene(now);
+            if (phase !== 'MENU') {
+                const r = ballR();
+                balls.forEach(b => { const p = ballWorld(b); drawBall(p.x, p.y, r); });
+                falling.forEach(f => drawBall(f.x, f.y, r));
+                drawHud(now);
+            }
+            particles.forEach(p => { ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 7); ctx.fill(); });
+            ctx.globalAlpha = 1;
+        }
+
+        function loop(now) { update(now); draw(now); requestAnimationFrame(loop); }
+
+        /* ---------------- الكاميرا ---------------- */
+        const HELP = 'ميزان بين لاعبين متقابلين: <b>كل لاعب يتحكم بطرف اللوح برفع يده أو خفضها</b>. ارفع طرفك لتدفع الكرة نحو خصمك، ومن تسقط الكرة من جهته يخسر النقطة. ' +
+                     'يقف اللاعب الأول في الجهة اليسرى من الكاميرا والثاني في اليمنى، أو يلمس كلٌّ نصفه من الشاشة.';
+        function ready(extra) {
+            loader.classList.add('hidden');
+            descEl.innerHTML = HELP + (extra ? '<br>' + extra : '');
+            showMenu();
+        }
+        async function initCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof Hands === 'undefined') {
+                ready('الكاميرا غير متاحة — العبوا باللمس.');
+                return;
+            }
+            try {
+                const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+                const mobile = /Android|iPhone|iPad|Mobi/i.test(navigator.userAgent);
+                hands.setOptions({ maxNumHands: 2, modelComplexity: mobile ? 0 : 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+                hands.onResults((r) => {
+                    handPts = (r.multiHandLandmarks || []).map(lm => {
+                        const nx = 1 - lm[9].x;
+                        return { x: nx * w, nx, ny: lm[9].y };
+                    });
+                });
+                await GC.startCamera(video, hands);
+                cameraOK = true;
+                ready('');
+            } catch (e) {
+                console.error(e);
+                ready('تعذر تشغيل الكاميرا — العبوا باللمس.');
+            }
+        }
+
+        layout();
+        resetIdle();
+        function resetIdle() { P.forEach(p => { p.h = 0.5; p.target = 0.5; }); }
+        requestAnimationFrame(loop);
+        initCamera();
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

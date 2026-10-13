@@ -186,17 +186,51 @@
       return;
     }
 
-    if (['ArrowRight', 'ArrowDown', 'PageDown'].includes(key)) {
+    if (['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(key)) {
+      event.preventDefault();
+      moveSpatial(key);
+      return;
+    }
+
+    if (key === 'PageDown') {
       event.preventDefault();
       moveFocus(1);
       return;
     }
 
-    if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(key)) {
+    if (key === 'PageUp') {
       event.preventDefault();
       moveFocus(-1);
       return;
     }
+  }
+
+  // تنقل مكاني: السهم يذهب إلى أقرب عنصر في اتجاهه الفعلي على الشاشة (صحيح في الصفحات العربية RTL)
+  function moveSpatial(key) {
+    const items = getFocusableElements();
+    if (!items.length) return;
+    if (focusIndex >= items.length || focusIndex < 0) focusIndex = 0;
+    const cur = items[focusIndex].getBoundingClientRect();
+    const cx = cur.left + cur.width / 2;
+    const cy = cur.top + cur.height / 2;
+    const dir = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1] }[key];
+    let best = -1;
+    let bestScore = Infinity;
+    items.forEach((el, i) => {
+      if (i === focusIndex) return;
+      const r = el.getBoundingClientRect();
+      const dx = r.left + r.width / 2 - cx;
+      const dy = r.top + r.height / 2 - cy;
+      const along = dx * dir[0] + dy * dir[1];       // المسافة في اتجاه السهم
+      const across = Math.abs(dx * dir[1] + dy * dir[0]); // الانحراف الجانبي
+      if (along <= 4) return;
+      const score = along + across * 2.5;
+      if (score < bestScore) { bestScore = score; best = i; }
+    });
+    if (best < 0) return;
+    focusIndex = best;
+    playRemoteSound('move');
+    updateSelection();
   }
 
   function syncFromClick(event) {

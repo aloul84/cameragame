@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>عازف الألحان</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="game-common.js"></script>
+    <script src="edu-common.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0a0f1e; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = EDU.makeVideo();
+        let w = 0, h = 0;
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; });
+
+        /* ---------------- السلّم الموسيقي: ارتفاع يدك = درجة النغمة ---------------- */
+        const NOTES = [
+            { n: 'دو', f: 261.63, c: '#ef4444' }, { n: 'ري', f: 293.66, c: '#f97316' }, { n: 'مي', f: 329.63, c: '#facc15' }, { n: 'فا', f: 349.23, c: '#4ade80' },
+            { n: 'صول', f: 392.0, c: '#22d3ee' }, { n: 'لا', f: 440.0, c: '#3b82f6' }, { n: 'سي', f: 493.88, c: '#8b5cf6' }, { n: 'دو', f: 523.25, c: '#ec4899' }
+        ];
+        const NZ = NOTES.length;
+
+        /* ---------------- المستويات العشرة ---------------- */
+        const rnd = (n, len) => { const a = []; for (let i = 0; i < len; i++) { let x; do { x = EDU.rand(0, NZ - 1); } while (i && x === a[i - 1]); a.push(x); } return a; };
+        const LEVELS = [
+            { name: 'ثلاث نغمات', sub: 'دو ري مي', tune: [0, 1, 2], tempo: 0.8 },
+            { name: 'نزولاً', sub: 'مي ري دو', tune: [2, 1, 0], tempo: 0.8 },
+            { name: 'القفزات', sub: 'دو مي صول', tune: [0, 2, 4], tempo: 0.75 },
+            { name: 'خمس نغمات', sub: 'صعود', tune: [0, 1, 2, 3, 4], tempo: 0.7 },
+            { name: 'خمس نغمات', sub: 'هبوط', tune: [4, 3, 2, 1, 0], tempo: 0.7 },
+            { name: 'نجمة نجمة', sub: 'لحن مشهور', tune: [0, 0, 4, 4, 5, 5, 4], tempo: 0.65 },
+            { name: 'ماري', sub: 'لحن مشهور', tune: [2, 1, 0, 1, 2, 2, 2], tempo: 0.6 },
+            { name: 'السلّم كاملاً', sub: 'دو إلى دو', tune: [0, 1, 2, 3, 4, 5, 6, 7], tempo: 0.55 },
+            { name: 'لحن عشوائي', sub: '٦ نغمات', random: 6, tempo: 0.55 },
+            { name: 'التحدي', sub: '٨ نغمات سريعة', random: 8, tempo: 0.45 }
+        ];
+        const ROUNDS = 3, MAX_MISTAKES = 3, HOLD_NOTE = 0.4, WRONG_HOLD = 0.9;
+
+        /* ---------------- الصوت ---------------- */
+        let ac = null, theremin = null;
+        function audio() { ac = GC.audioInit(); return ac; }
+        function toneOnce(i, dur, vol) {
+            if (!audio()) return;
+            const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+            o.type = 'triangle'; o.frequency.value = NOTES[i].f;
+            g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol || 0.28, t + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+            o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + dur + 0.05);
+        }
+        function thereminSet(i) {                     // نغمة مستمرة تتبع يدك (i = -1 للإيقاف)
+            if (!audio()) return;
+            if (!theremin) {
+                const o = ac.createOscillator(), g = ac.createGain(), lfo = ac.createOscillator(), lg = ac.createGain();
+                o.type = 'sine'; lfo.frequency.value = 5.5; lg.gain.value = 4; lfo.connect(lg); lg.connect(o.frequency);
+                g.gain.value = 0; o.connect(g); g.connect(ac.destination); o.start(); lfo.start();
+                theremin = { o, g };
+            }
+            const t = ac.currentTime;
+            if (i < 0) theremin.g.gain.setTargetAtTime(0, t, 0.05);
+            else { theremin.o.frequency.setTargetAtTime(NOTES[i].f, t, 0.025); theremin.g.gain.setTargetAtTime(0.16, t, 0.05); }
+        }
+
+        /* ---------------- مدخل اليد (الارتفاع) ---------------- */
+        let handY = null, lastHandT = 0, ptrY = null, lastPtrT = 0;
+        let handOK = false;
+        function onHands(res) {
+            const l = res.multiHandLandmarks && res.multiHandLandmarks[0];
+            if (l) { handY = l[9].y; lastHandT = performance.now(); }
+        }
+        window.addEventListener('pointermove', (e) => { if (e.target.closest && e.target.closest('button, .edu-overlay')) return; ptrY = e.clientY / h; lastPtrT = performance.now(); });
+        window.addEventListener('pointerdown', (e) => { if (e.target.closest && e.target.closest('button, .edu-overlay')) return; ptrY = e.clientY / h; lastPtrT = performance.now(); });
+        let sy = 0.5, zone = -1;
+        function currentZone(now) {
+            let y = null, src = null;
+            if (now - lastPtrT < 2500 && ptrY !== null) { y = ptrY; src = 'ptr'; }
+            else if (now - lastHandT < 500 && handY !== null) { y = Math.max(0, Math.min(1, (handY - 0.12) / 0.76)); src = 'hand'; }
+            if (y === null) { zone = -1; return -1; }
+            sy += (y - sy) * 0.45;
+            const z = Math.max(0, Math.min(NZ - 1, Math.floor((1 - sy) * NZ)));
+            if (zone < 0) zone = z;
+            else if (z !== zone) { const c = (zone + 0.5) / NZ; if (Math.abs((1 - sy) - c) > 0.5 / NZ + 0.02) zone = z; }
+            return zone;
+        }
+
+        /* ---------------- حالة اللعب ---------------- */
+        let level = 0, round = 0, mistakes = 0, melody = [], phase = 'MENU';
+        let listenIdx = 0, listenNext = 0, progress = 0, holdT = 0, wrongT = 0, needLeave = false, lastAccepted = -1;
+        let msg = '', phaseUntil = 0, flash = 0, flashC = '', lastT = performance.now(), activeNote = -1, activeUntil = 0;
+
+        const menu = EDU.init({
+            id: 'mh', title: 'عازف الألحان', emoji: '🎵', color: '#fbbf24', bg1: '#3b2a0e', bg2: '#0a0714',
+            levels: LEVELS, onStart: startLevel
+        });
+        function startLevel(i) {
+            level = i; round = 0; mistakes = 0; EDU.fx.list = [];
+            startRound(performance.now());
+        }
+        function startRound(now) {
+            const L = LEVELS[level];
+            melody = L.random ? rnd(NZ, L.random) : L.tune.slice();
+            progress = 0; holdT = 0; wrongT = 0; needLeave = false; lastAccepted = -1;
+            phase = 'INTRO'; phaseUntil = now + 1600;
+            msg = `الجولة ${round + 1} من ${ROUNDS}: ${round === 0 ? 'استمع ثم كرّر' : round === 1 ? 'بلا تلميح للنغمة التالية' : 'من الذاكرة! بلا أسماء'}`;
+        }
+        function startListen(now) { phase = 'LISTEN'; listenIdx = 0; listenNext = now + 400; }
+        function endLevel() {
+            phase = 'MENU'; thereminSet(-1);
+            const stars = mistakes >= MAX_MISTAKES ? 0 : mistakes === 0 ? 3 : mistakes === 1 ? 2 : 1;
+            menu.finish(stars, `أتقنت اللحن في ${ROUNDS} جولات`, level);
+        }
+
+        function update(now, dt) {
+            if (flash > 0) flash -= dt;
+            const L = phase === 'MENU' ? null : LEVELS[level];
+            const z = currentZone(now);
+            if (phase !== 'MENU') thereminSet(phase === 'LISTEN' || phase === 'INTRO' ? -1 : z);
+            if (phase === 'INTRO') { if (now >= phaseUntil) startListen(now); return; }
+            if (phase === 'LISTEN') {
+                if (now >= listenNext) {
+                    if (listenIdx >= melody.length) { phase = 'PLAY'; progress = 0; holdT = 0; msg = 'دورك! كرّر اللحن بيدك'; GC.beep(880, 0.15, 'square', 0.1); return; }
+                    const n = melody[listenIdx++]; toneOnce(n, L.tempo * 0.9); activeNote = n; activeUntil = now + L.tempo * 900; listenNext = now + L.tempo * 1000;
+                }
+                return;
+            }
+            if (phase === 'DONE') { if (now >= phaseUntil) { round++; if (round >= ROUNDS) endLevel(); else startRound(now); } return; }
+            if (phase !== 'PLAY') return;
+            if (z < 0) { holdT = 0; wrongT = 0; return; }
+            const want = melody[progress];
+            if (needLeave) { if (z !== lastAccepted) needLeave = false; else return; }
+            if (z === want) {
+                holdT += dt; wrongT = 0;
+                if (holdT >= HOLD_NOTE) {
+                    holdT = 0; lastAccepted = z; needLeave = true; progress++;
+                    toneOnce(z, 0.35, 0.18); activeNote = z; activeUntil = now + 300;
+                    EDU.fx.burst(w / 2, h * 0.16, [NOTES[z].c, '#fff'], 10);
+                    if (progress >= melody.length) {
+                        phase = 'DONE'; phaseUntil = now + 1800; msg = round === ROUNDS - 1 ? 'لحن رائع! 🎶' : 'أحسنت! 👏'; flash = 0.3; flashC = '74,222,128';
+                        [523, 659, 784, 1047].forEach((f, k) => GC.beep(f, 0.15, 'triangle', 0.15, k * 0.08 + 0.25));
+                    }
+                }
+            } else {
+                holdT = 0; wrongT += dt;
+                if (wrongT >= WRONG_HOLD) {
+                    wrongT = 0; mistakes++; flash = 0.3; flashC = '248,113,113'; GC.beep(150, 0.3, 'sawtooth', 0.14, 0, 80);
+                    msg = `النغمة المطلوبة: ${NOTES[want].n}`;
+                    if (mistakes >= MAX_MISTAKES) endLevel();
+                }
+            }
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function draw(now, dt) {
+            GC.begin(ctx);
+            ctx.fillStyle = '#0a0f1e'; ctx.fillRect(0, 0, w, h);
+            const vr = EDU.fitRect(video, { x: 0, y: 0, w, h });
+            if (handOK) EDU.drawVideo(ctx, video, vr, 0.22);
+            if (phase === 'MENU') return;
+            const L = LEVELS[level], top = 96, bot = h - 8, bandH = (bot - top) / NZ;
+            const z = zone, expecting = phase === 'PLAY' ? melody[progress] : -1;
+            const hideNames = round === 2;
+            for (let i = 0; i < NZ; i++) {
+                const y = bot - (i + 1) * bandH, N = NOTES[i];
+                const on = (z === i && (phase === 'PLAY')) || (activeNote === i && now < activeUntil);
+                ctx.fillStyle = N.c + (on ? 'dd' : '30'); ctx.fillRect(12, y + 2, w - 24, bandH - 4);
+                ctx.strokeStyle = N.c + '99'; ctx.lineWidth = 2; ctx.strokeRect(12, y + 2, w - 24, bandH - 4);
+                const showName = !hideNames || on;
+                if (showName) EDU.text(ctx, N.n, 56, y + bandH / 2, Math.min(bandH * 0.6, 34), on ? '#fff' : '#e2e8f0');
+                if (round === 0 && expecting === i && phase === 'PLAY') { ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.setLineDash([10, 8]); ctx.strokeRect(14, y + 4, w - 28, bandH - 8); ctx.setLineDash([]); }
+            }
+            // مؤشر اليد
+            if (z >= 0 && phase !== 'LISTEN' && phase !== 'INTRO') {
+                const cy = bot - sy * (bot - top) * 0 - (1 - 0) * 0; // موضع ثابت أفقياً
+                const yy = top + (1 - ((1 - sy))) * 0;
+                const posY = top + sy * (bot - top);
+                ctx.beginPath(); ctx.arc(w / 2, posY, 22, 0, 7); ctx.fillStyle = NOTES[z].c; ctx.shadowColor = NOTES[z].c; ctx.shadowBlur = 24; ctx.fill(); ctx.shadowBlur = 0;
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+                EDU.text(ctx, NOTES[z].n, w / 2, posY, 15, '#fff');
+                if (phase === 'PLAY' && holdT > 0) { ctx.beginPath(); ctx.arc(w / 2, posY, 32, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, holdT / HOLD_NOTE)); ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 5; ctx.stroke(); }
+            }
+            // رأس الشاشة: الخانات والتقدم
+            ctx.fillStyle = 'rgba(10,15,30,0.9)'; ctx.fillRect(0, 0, w, top - 4);
+            const fs = Math.max(13, Math.min(w * 0.036, 18));
+            ctx.textBaseline = 'middle'; ctx.font = `700 ${fs}px Tahoma`;
+            ctx.textAlign = 'right'; ctx.fillStyle = '#fcd34d'; ctx.fillText(`المستوى ${level + 1}: ${L.name}`, w - 12, 18);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#e2e8f0'; ctx.fillText(`الجولة ${Math.min(round + 1, ROUNDS)}/${ROUNDS}`, w / 2, 18);
+            ctx.textAlign = 'left'; ctx.fillText('❤️'.repeat(MAX_MISTAKES - mistakes) + '🖤'.repeat(mistakes), 118, 18);
+            const n = melody.length, cs = Math.min(34, (w - 40) / n - 6);
+            for (let i = 0; i < n; i++) {
+                const x = w / 2 + ((n - 1) / 2 - i) * (cs + 6), y = 52;
+                const done = i < progress && (phase === 'PLAY' || phase === 'DONE');
+                ctx.beginPath(); ctx.arc(x, y, cs / 2, 0, 7);
+                ctx.fillStyle = done ? NOTES[melody[i]].c : 'rgba(255,255,255,0.1)'; ctx.fill();
+                ctx.strokeStyle = (phase === 'PLAY' && i === progress) ? '#fff' : 'rgba(255,255,255,0.3)'; ctx.lineWidth = (phase === 'PLAY' && i === progress) ? 3 : 1.5; ctx.stroke();
+                if (done && !hideNames) EDU.text(ctx, NOTES[melody[i]].n, x, y, cs * 0.34, '#fff');
+                if (phase === 'LISTEN' && i < listenIdx) { ctx.fillStyle = NOTES[melody[i]].c; ctx.beginPath(); ctx.arc(x, y, cs * 0.28, 0, 7); ctx.fill(); }
+            }
+            EDU.text(ctx, phase === 'LISTEN' ? '👂 استمع جيداً...' : msg, w / 2, 82, Math.max(13, Math.min(w * 0.035, 18)), phase === 'LISTEN' ? '#93c5fd' : '#fde68a');
+            if (phase === 'INTRO') { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, h * 0.4, w, 70); EDU.text(ctx, msg, w / 2, h * 0.4 + 35, Math.max(16, Math.min(w * 0.05, 28)), '#fff'); }
+            if (phase === 'PLAY' && z < 0) EDU.text(ctx, 'ارفع يدك أو حرّك المؤشر ↕', w / 2, h / 2, Math.max(16, Math.min(w * 0.05, 26)), '#fca5a5');
+            if (flash > 0) { ctx.fillStyle = `rgba(${flashC},${Math.min(0.2, flash)})`; ctx.fillRect(0, 0, w, h); }
+            EDU.fx.draw(ctx, dt);
+        }
+        function loop(now) { const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now; update(now, dt); draw(now, dt); requestAnimationFrame(loop); }
+
+        const HELP = 'تعلّم النغمات الموسيقية: <b>ارتفاع يدك يحدّد النغمة</b> (أعلى = أحدّ). استمع للحن ثم كرّره بحركة يدك لأعلى وأسفل وثبّت كل نغمة لحظة. بدون كاميرا حرّك الفأرة أو إصبعك لأعلى وأسفل.';
+        (async function init() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { menu.ready(HELP); return; }
+            try { await EDU.startHands(video, onHands, 1); handOK = true; menu.ready(HELP); }
+            catch (e) { console.error(e); menu.ready(HELP + '<br>تعذر تشغيل الكاميرا — استخدم الفأرة أو إصبعك.'); }
+        })();
+        requestAnimationFrame(loop);
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

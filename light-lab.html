@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>مختبر الضوء</title>
+    <script src="game-common.js"></script>
+    <script src="edu-common.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0a0a0f; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = EDU.makeVideo();
+        let w = 0, h = 0;
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; });
+
+        /* ---------------- قياس الضوء من الكاميرا ---------------- */
+        const SW = 32, SH = 24, samp = document.createElement('canvas'); samp.width = SW; samp.height = SH;
+        const sctx = samp.getContext('2d', { willReadFrequently: true });
+        let m = { all: 0.5, left: 0.5, right: 0.5, detail: 0.1 }, lastSample = 0, base = { all: 0.5, left: 0.5, right: 0.5, detail: 0.1 };
+        let calBuf = [];
+        function measure(now) {
+            if (now - lastSample < 90 || !video.videoWidth) return;
+            lastSample = now;
+            sctx.drawImage(video, 0, 0, SW, SH);
+            const d = sctx.getImageData(0, 0, SW, SH).data;
+            let all = 0, l = 0, r = 0, det = 0, prev = 0;
+            for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) {
+                const i = (y * SW + x) * 4, Y = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
+                all += Y; if (x < SW / 2) l += Y; else r += Y;
+                if (x) det += Math.abs(Y - prev); prev = Y;
+            }
+            const n = SW * SH;
+            m = { all: all / n, left: l / (n / 2), right: r / (n / 2), detail: det / n };
+            // الكاميرا مقلوبة كالمرآة: يسار الصورة الخام = يمين الشاشة
+        }
+        const ratio = () => m.all / Math.max(0.02, base.all);
+        const rL = () => m.right / Math.max(0.02, base.right);     // يسار الشاشة (بعد المرآة) = يمين الصورة الخام
+        const rR = () => m.left / Math.max(0.02, base.left);
+        const detailRatio = () => m.detail / Math.max(0.004, base.detail);
+
+        /* ---------------- المهام ---------------- */
+        const T = {
+            dark:   { text: 'غطِّ عدسة الكاميرا بيدك تماماً', test: () => ratio() < 0.3, hold: 0.8, fact: 'الأجسام المعتمة (مثل يدك) لا تسمح بمرور الضوء، لذلك يعمّ الظلام.' },
+            bright: { text: 'اكشف العدسة ودع الضوء يدخل', test: () => ratio() > 0.85, hold: 0.8, fact: 'عندما يصل الضوء إلى العدسة نرى الأشياء بوضوح.' },
+            left:   { text: 'أنشئ ظلاً على الجانب الأيسر فقط (غطِّ نصف العدسة)', test: () => rL() < 0.45 && rR() > 0.7, hold: 0.8, fact: 'الظل يتكوّن خلف الجسم الذي يحجب جزءاً من الضوء.' },
+            right:  { text: 'أنشئ ظلاً على الجانب الأيمن فقط', test: () => rR() < 0.45 && rL() > 0.7, hold: 0.8, fact: 'كلما كان الجسم أقرب للمصدر كان ظلّه أكبر.' },
+            partial:{ text: 'اجعل نصف الضوء فقط يصل (٣٥٪ إلى ٦٠٪) — استخدم أصابعك أو ورقة', test: () => ratio() > 0.35 && ratio() < 0.62, hold: 1.0, fact: 'بعض المواد تُمرر جزءاً من الضوء فقط.' },
+            flash:  { text: 'سلّط مصباحاً (ضوء الهاتف) نحو الكاميرا لتزداد الإضاءة جداً', test: () => ratio() > 1.6 || m.all > 0.9, hold: 0.5, fact: 'المصباح مصدر ضوء يرسل الضوء بنفسه، أما الأشياء الأخرى فتعكسه.' },
+            paper:  { text: 'ضع ورقة بيضاء رقيقة أو منديلاً أمام العدسة: الضوء يمرّ لكن الصورة تصبح ضبابية', test: () => ratio() > 0.2 && ratio() < 0.85 && detailRatio() < 0.55, hold: 1.0, fact: 'المواد شبه الشفافة تمرّر الضوء مُشتَّتاً فلا تظهر الأشياء بوضوح.' },
+            wave2:  { text: 'اصنع ومضتين: غطِّ العدسة ثم اكشفها مرتين', wave: 2, fact: 'الضوء يمكن التحكّم به: هكذا تعمل إشارات الضوء!' },
+            wave3:  { text: 'اصنع ثلاث ومضات سريعة', wave: 3, fact: 'إشارات الضوء المتقطّعة تُستخدم للتواصل عبر مسافات بعيدة.' },
+            classify: { text: 'ضع جسماً أمام العدسة ثم صنّفه حسب مقدار الضوء الذي مرّ منه', classify: true, fact: 'معتم: لا يمرّ ضوء • شبه شفاف: يمرّ بعضه • شفاف: يمرّ كله تقريباً.' }
+        };
+        const LEVELS = [
+            { name: 'ظلام ونور', sub: 'غطِّ واكشف', limit: 40, tasks: ['dark', 'bright', 'dark', 'bright', 'dark'], lesson: 'ابدأ بالتجربة الأولى: كيف يتحكّم الضوء بما نرى.' },
+            { name: 'الظلال', sub: 'يسار ويمين', limit: 40, tasks: ['left', 'right', 'left', 'right', 'dark'], lesson: 'الظل يظهر حيث يُحجب الضوء.' },
+            { name: 'ضوء جزئي', sub: '٣٥٪ - ٦٠٪', limit: 45, tasks: ['partial', 'partial', 'left', 'partial', 'right'], lesson: 'ليس كل شيء يحجب الضوء كلياً.' },
+            { name: 'صنّف المادة', sub: 'معتم/شفاف', limit: 60, tasks: ['classify', 'classify', 'classify', 'classify', 'classify'], lesson: 'جرّب أشياء مختلفة (يدك، ورقة، غلاف بلاستيكي) وصنّفها.' },
+            { name: 'مصدر الضوء', sub: 'مصباح الهاتف', limit: 45, tasks: ['flash', 'dark', 'flash', 'bright', 'flash'], lesson: 'ما الفرق بين مصدر الضوء والجسم المضاء؟' },
+            { name: 'إشارات الضوء', sub: 'ومضات', limit: 30, tasks: ['wave2', 'wave3', 'wave2', 'wave3', 'wave2'], lesson: 'تحكّم بالضوء لتصنع إشارة.' },
+            { name: 'شبه شفاف', sub: 'الورقة', limit: 45, tasks: ['paper', 'classify', 'paper', 'classify', 'paper'], lesson: 'الورقة الرقيقة تُمرّر الضوء لكنها تشتّته.' },
+            { name: 'مختبر سريع', sub: '٢٠ ثانية', limit: 20, tasks: ['dark', 'partial', 'left', 'flash', 'wave2', 'paper'], pick: 5, lesson: 'اختبر نفسك بسرعة!' },
+            { name: 'مختبر أسرع', sub: '١٥ ثانية', limit: 15, tasks: ['dark', 'partial', 'right', 'flash', 'wave3', 'paper', 'classify'], pick: 6, lesson: 'تركيز أعلى!' },
+            { name: 'العالِم', sub: '١٢ ثانية', limit: 12, tasks: ['dark', 'partial', 'left', 'right', 'flash', 'wave3', 'paper', 'classify'], pick: 7, lesson: 'التحدي الأخير في مختبر الضوء!' }
+        ];
+        const MAX_MISSES = 2;
+        const classOf = (r) => r < 0.1 ? 'معتم' : r > 0.9 ? 'شفاف' : 'شبه شفاف';
+
+        let level = 0, qi = 0, misses = 0, correct = 0, phase = 'MENU', task = null, tasks = [];
+        let calUntil = 0, qStart = 0, hold = 0, phaseUntil = 0, msg = '', fact = '', ok = true, flash = 0, flashC = '', lastT = performance.now(), cameraOK = false;
+        let waveCount = 0, waveState = 'bright', classChoice = null, btns = [];
+
+        const menu = EDU.init({
+            id: 'll', title: 'مختبر الضوء', emoji: '💡', color: '#fde047', bg1: '#4a3b08', bg2: '#0a0804',
+            levels: LEVELS, onStart: startLevel
+        });
+        function startLevel(i) {
+            level = i; qi = 0; misses = 0; correct = 0; EDU.fx.list = [];
+            const L = LEVELS[i]; tasks = L.pick ? EDU.shuffle(L.tasks).slice(0, L.pick) : L.tasks.slice();
+            phase = 'CAL'; calUntil = performance.now() + 3000; calBuf = [];
+        }
+        function nextTask(now) {
+            if (qi >= tasks.length) return endLevel();
+            task = T[tasks[qi]]; phase = 'Q'; qStart = now; hold = 0; waveCount = 0; waveState = ratio() < 0.3 ? 'dark' : 'bright'; classChoice = null;
+        }
+        function endLevel() {
+            phase = 'MENU';
+            const total = tasks.length, stars = misses > MAX_MISSES ? 0 : misses === 0 ? 3 : misses === 1 ? 2 : 1;
+            menu.finish(stars, `التجارب الناجحة: ${correct} من ${total}`, level);
+        }
+        function recalibrate(now) { phase = 'CAL'; calUntil = now + 2500; calBuf = []; }
+
+        /* ---------------- لمس: تصنيف المادة وإعادة المعايرة ---------------- */
+        window.addEventListener('pointerdown', (e) => {
+            if (e.target.closest && e.target.closest('button, .edu-overlay')) return;
+            const b = btns.find(b => e.clientX >= b.x && e.clientX <= b.x + b.w && e.clientY >= b.y && e.clientY <= b.y + b.h);
+            if (!b) return;
+            if (b.id === 'recal') { if (phase === 'Q') recalibrate(performance.now()); return; }
+            if (phase === 'Q' && task.classify) {
+                const right = classOf(ratio());
+                if (b.id === right) done(performance.now(), true, `صحيح! نسبة الضوء ${EDU.toAr(Math.round(ratio() * 100))}٪ ← ${right}`);
+                else done(performance.now(), false, `نسبة الضوء ${EDU.toAr(Math.round(ratio() * 100))}٪ ← ${right}`);
+            }
+        });
+        function done(now, good, text) {
+            ok = good; msg = text; fact = task.fact; phase = 'RES'; phaseUntil = now + 2800; qi++;
+            if (good) { correct++; flash = 0.3; flashC = '253,224,71'; EDU.fx.burst(w / 2, h * 0.4, ['#fde047', '#fff', '#fbbf24'], 40); [660, 880, 1100].forEach((f, k) => GC.beep(f, 0.12, 'triangle', 0.16, k * 0.08)); }
+            else { misses++; flash = 0.3; flashC = '248,113,113'; GC.beep(160, 0.3, 'sawtooth', 0.16, 0, 80); }
+        }
+
+        function update(now, dt) {
+            if (flash > 0) flash -= dt;
+            if (cameraOK) measure(now);
+            if (phase === 'CAL') {
+                calBuf.push({ t: now, m });
+                if (now >= calUntil) {
+                    const recent = calBuf.filter(c => now - c.t < 1500), n = Math.max(1, recent.length);
+                    base = { all: recent.reduce((s, c) => s + c.m.all, 0) / n, left: recent.reduce((s, c) => s + c.m.left, 0) / n, right: recent.reduce((s, c) => s + c.m.right, 0) / n, detail: recent.reduce((s, c) => s + c.m.detail, 0) / n };
+                    if (qi === 0 || !task) nextTask(now); else { phase = 'Q'; qStart = now; hold = 0; }
+                }
+                return;
+            }
+            if (phase === 'RES') { if (now >= phaseUntil) { if (misses > MAX_MISSES) endLevel(); else nextTask(now); } return; }
+            if (phase !== 'Q') return;
+            const r = ratio();
+            if (task.wave) {
+                const st = r < 0.3 ? 'dark' : r > 0.7 ? 'bright' : waveState;
+                if (waveState === 'dark' && st === 'bright') { waveCount++; GC.beep(700 + waveCount * 150, 0.1, 'square', 0.12); }
+                waveState = st;
+                if (waveCount >= task.wave) { done(now, true, 'ومضات ممتازة! ✨'); return; }
+            } else if (task.test) {
+                if (task.test()) hold += dt; else hold = Math.max(0, hold - dt * 1.5);
+                if (hold >= task.hold) { done(now, true, 'نجحت التجربة! ✔'); return; }
+            }
+            if ((now - qStart) / 1000 >= LEVELS[level].limit) done(now, false, 'انتهى الوقت ⏱️');
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function gauge(cx, cy, r, now) {
+            const val = Math.max(0, Math.min(1.6, ratio())), a0 = Math.PI, a1 = Math.PI * 2;
+            ctx.lineWidth = 16; ctx.lineCap = 'round';
+            const gr = ctx.createLinearGradient(cx - r, 0, cx + r, 0); gr.addColorStop(0, '#312e81'); gr.addColorStop(0.5, '#facc15'); gr.addColorStop(1, '#ffffff');
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.arc(cx, cy, r, a0, a1); ctx.stroke();
+            ctx.strokeStyle = gr; ctx.beginPath(); ctx.arc(cx, cy, r, a0, a0 + (a1 - a0) * Math.min(1, val / 1.6)); ctx.stroke();
+            // مجال الهدف
+            if (task && phase === 'Q') {
+                const band = { dark: [0, 0.3], bright: [0.85, 1.6], partial: [0.35, 0.62], flash: [1.6, 1.6], paper: [0.2, 0.85] }[tasks[qi]];
+                if (band) { ctx.strokeStyle = 'rgba(74,222,128,0.9)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(cx, cy, r + 14, a0 + (a1 - a0) * band[0] / 1.6, a0 + (a1 - a0) * Math.max(band[1], band[0] + 0.03) / 1.6); ctx.stroke(); }
+            }
+            const na = a0 + (a1 - a0) * Math.min(1, val / 1.6);
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(na) * (r - 24), cy + Math.sin(na) * (r - 24)); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, 8, 0, 7); ctx.fillStyle = '#fff'; ctx.fill();
+            EDU.text(ctx, `${EDU.toAr(Math.round(ratio() * 100))}٪`, cx, cy - r * 0.32, r * 0.42, '#fff', '#000');
+            EDU.text(ctx, 'نسبة الضوء', cx, cy - r * 0.05, Math.max(12, r * 0.14), '#d6d3d1');
+        }
+
+        function draw(now, dt) {
+            GC.begin(ctx);
+            ctx.fillStyle = '#0a0a0f'; ctx.fillRect(0, 0, w, h);
+            const vr = EDU.fitRect(video, { x: 0, y: 0, w, h });
+            if (cameraOK) EDU.drawVideo(ctx, video, vr, 0.9);
+            if (phase === 'MENU') return;
+            const L = LEVELS[level], fs = Math.max(14, Math.min(w * 0.04, 20));
+            // لمبة ترمز لشدة الضوء
+            ctx.fillStyle = 'rgba(8,6,2,0.55)'; ctx.fillRect(0, 0, w, h);
+            const gr = Math.min(120, w * 0.3);
+            gauge(w / 2, h * 0.64, gr, now);
+            ctx.font = `${gr * 0.5}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.globalAlpha = 0.35 + Math.min(1, ratio()) * 0.65; ctx.fillText(ratio() < 0.3 ? '🌙' : '💡', w / 2, h * 0.64 + gr * 0.5); ctx.globalAlpha = 1;
+            // الشريط العلوي
+            ctx.fillStyle = 'rgba(10,8,2,0.9)'; ctx.fillRect(0, 0, w, 120);
+            ctx.textBaseline = 'middle'; ctx.font = `700 ${fs}px Tahoma`;
+            ctx.textAlign = 'right'; ctx.fillStyle = '#fde68a'; ctx.fillText(`المستوى ${level + 1}: ${L.name}`, w - 12, 20);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#e2e8f0'; ctx.fillText(`التجربة ${Math.min(qi + (phase === 'Q' ? 1 : 0), tasks.length)} / ${tasks.length}`, w / 2, 20);
+            ctx.textAlign = 'left'; ctx.fillStyle = '#fca5a5'; ctx.fillText(`✖ ${misses}/${MAX_MISSES + 1}`, 118, 20);
+            if (phase === 'CAL') { EDU.text(ctx, 'المعايرة: اترك الكاميرا مكشوفة', w / 2, 62, Math.max(17, Math.min(w * 0.05, 28)), '#fde047'); EDU.text(ctx, L.lesson, w / 2, 96, Math.max(13, Math.min(w * 0.035, 18)), '#e2e8f0'); EDU.text(ctx, Math.ceil(Math.max(0, calUntil - now) / 1000), w / 2, h * 0.3, 70, '#fde047', '#000'); }
+            if (task && (phase === 'Q' || phase === 'RES')) {
+                const txt = task.text, sz = Math.max(14, Math.min(w * (txt.length > 50 ? 0.034 : 0.042), 24));
+                const lines = txt.length > 42 ? [txt.slice(0, txt.lastIndexOf(' ', 42)), txt.slice(txt.lastIndexOf(' ', 42) + 1)] : [txt];
+                lines.forEach((ln, i) => EDU.text(ctx, ln, w / 2, 56 + i * (sz + 6), sz, '#fef9c3'));
+                if (phase === 'Q') { const f = Math.max(0, 1 - (now - qStart) / 1000 / L.limit); ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(12, 112, w - 24, 5); ctx.fillStyle = f < 0.3 ? '#f87171' : '#fde047'; ctx.fillRect(12, 112, (w - 24) * f, 5); }
+                if (phase === 'Q' && task.test && hold > 0) { ctx.beginPath(); ctx.arc(w / 2, h * 0.64 + 50, 26, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, hold / task.hold)); ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 7; ctx.stroke(); }
+                if (phase === 'Q' && task.wave) EDU.text(ctx, `✨ ${EDU.toAr(waveCount)} / ${EDU.toAr(task.wave)}`, w / 2, h * 0.3, 44, '#fde047', '#000');
+            }
+            // الأزرار
+            btns = [];
+            if (phase === 'Q' && task && task.classify) {
+                const names = ['معتم', 'شبه شفاف', 'شفاف'], bw = Math.min(150, w / 3.4), by = h - 80;
+                names.forEach((nm, i) => { const bx = w / 2 + (1 - i) * (bw + 10) - bw / 2; btns.push({ id: nm, x: bx, y: by, w: bw, h: 52 }); ctx.fillStyle = 'rgba(253,224,71,0.2)'; ctx.beginPath(); ctx.roundRect(bx, by, bw, 52, 14); ctx.fill(); ctx.strokeStyle = '#fde047'; ctx.lineWidth = 2; ctx.stroke(); EDU.text(ctx, nm, bx + bw / 2, by + 26, 18, '#fff'); });
+                EDU.text(ctx, `القياس الآن: ${EDU.toAr(Math.round(ratio() * 100))}٪`, w / 2, by - 18, 15, '#fde68a');
+            }
+            if (phase === 'Q') { btns.push({ id: 'recal', x: 12, y: h - 50, w: 120, h: 38 }); ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(12, h - 50, 120, 38, 12); ctx.fill(); EDU.text(ctx, '⚙️ معايرة', 72, h - 31, 14, '#fff'); }
+            if (phase === 'RES') {
+                ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(0, h * 0.28, w, h * 0.24);
+                EDU.text(ctx, msg, w / 2, h * 0.28 + 34, Math.max(17, Math.min(w * 0.05, 28)), ok ? '#4ade80' : '#fca5a5');
+                const fz = Math.max(13, Math.min(w * 0.035, 19)), words = fact.split(' '); let line = '', y = h * 0.28 + 76;
+                words.forEach(wd => { if ((line + wd).length > (w < 500 ? 28 : 52)) { EDU.text(ctx, line, w / 2, y, fz, '#fef3c7'); y += fz + 6; line = ''; } line += wd + ' '; });
+                EDU.text(ctx, line, w / 2, y, fz, '#fef3c7');
+            }
+            if (flash > 0) { ctx.fillStyle = `rgba(${flashC},${Math.min(0.2, flash)})`; ctx.fillRect(0, 0, w, h); }
+            EDU.fx.draw(ctx, dt);
+        }
+        function loop(now) { const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now; update(now, dt); draw(now, dt); requestAnimationFrame(loop); }
+
+        const HELP = 'مختبر علمي للضوء بالكاميرا: غطِّ العدسة، أنشئ ظلالاً، اختبر مواد (ورقة، بلاستيك)، وسلّط ضوء الهاتف. تبدأ كل لعبة بمعايرة قصيرة: اترك الكاميرا مكشوفة.';
+        (async function init() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { menu.ready(HELP + '<br>هذه اللعبة تحتاج كاميرا.'); return; }
+            try { await EDU.startRaw(video); cameraOK = true; menu.ready(HELP); }
+            catch (e) { console.error(e); menu.ready(HELP + '<br>تعذر تشغيل الكاميرا — هذه اللعبة تحتاجها.'); }
+        })();
+        requestAnimationFrame(loop);
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

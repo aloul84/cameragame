@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>رسّام الهواء</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="game-common.js"></script>
+    <script src="edu-common.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0a1220; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = EDU.makeVideo();
+        let w = 0, h = 0;
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; });
+
+        /* ---------------- التعرّف على الأشكال المرسومة ---------------- */
+        const NAMES = { h: 'خط أفقي', v: 'خط رأسي', d: 'خط مائل', circle: 'دائرة', triangle: 'مثلث', square: 'مربع', rect: 'مستطيل', star: 'نجمة' };
+        const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+        const pathLen = (p) => { let s = 0; for (let i = 1; i < p.length; i++) s += dist(p[i - 1], p[i]); return s; };
+        function resample(pts, n) {
+            const total = pathLen(pts), step = total / (n - 1);
+            const out = [{ x: pts[0].x, y: pts[0].y }];
+            let acc = 0, prev = pts[0];
+            for (let i = 1; i < pts.length; i++) {
+                let cur = pts[i], d = dist(prev, cur);
+                while (acc + d >= step && d > 0) {
+                    const t = (step - acc) / d, q = { x: prev.x + (cur.x - prev.x) * t, y: prev.y + (cur.y - prev.y) * t };
+                    out.push(q); prev = q; d = dist(prev, cur); acc = 0;
+                }
+                acc += d; prev = cur;
+            }
+            while (out.length < n) out.push({ x: pts[pts.length - 1].x, y: pts[pts.length - 1].y });
+            return out.slice(0, n);
+        }
+        function classify(raw) {
+            if (raw.length < 8) return null;
+            const total = pathLen(raw);
+            let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+            raw.forEach(p => { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); });
+            const bw = maxX - minX, bh = maxY - minY, diag = Math.hypot(bw, bh);
+            if (total < 60 || diag < 40) return null;
+            const first = raw[0], last = raw[raw.length - 1];
+            const coarse = resample(raw, 14);                     // تقليل أثر الاهتزاز عند قياس الاستقامة
+            const straight = dist(first, last) / pathLen(coarse);
+            if (straight > 0.9) {
+                let a = Math.atan2(last.y - first.y, last.x - first.x) * 180 / Math.PI; a = (a + 360) % 180;
+                return a < 25 || a > 155 ? 'h' : (a > 65 && a < 115 ? 'v' : 'd');
+            }
+            const N = 72, W = 5;
+            let p = resample(raw, N);
+            // تنعيم خفيف
+            p = p.map((q, i) => { const a = p[Math.max(0, i - 1)], b = p[Math.min(N - 1, i + 1)]; return { x: (a.x + q.x * 2 + b.x) / 4, y: (a.y + q.y * 2 + b.y) / 4 }; });
+            const closed = dist(first, last) < 0.3 * total;
+            const idx = (i) => closed ? (i % N + N) % N : Math.max(0, Math.min(N - 1, i));
+            const turn = [];
+            for (let i = 0; i < N; i++) {
+                const a = p[idx(i - W)], b = p[i], c = p[idx(i + W)];
+                const v1 = { x: b.x - a.x, y: b.y - a.y }, v2 = { x: c.x - b.x, y: c.y - b.y };
+                let ang = Math.atan2(v1.x * v2.y - v1.y * v2.x, v1.x * v2.x + v1.y * v2.y) * 180 / Math.PI;
+                turn.push(!closed && (i < W || i >= N - W) ? 0 : ang);
+            }
+            // الزوايا الحادة: قمم محلية
+            const corners = [];
+            for (let i = 0; i < N; i++) {
+                const t = Math.abs(turn[i]);
+                if (t < 52) continue;
+                let isMax = true;
+                for (let k = -W; k <= W; k++) { if (k && Math.abs(turn[idx(i + k)]) > t + 1e-9) { isMax = false; break; } }
+                if (isMax && !corners.some(c => Math.min(Math.abs(c.i - i), N - Math.abs(c.i - i)) < W)) corners.push({ i, t });
+            }
+            const sharp = corners.filter(c => c.t > 100).length;
+            if (sharp >= 5 && corners.length <= 7) return 'star';
+            if (!closed) return null;
+            const aspect = bw / (bh || 1);
+            if (corners.length <= 2) return aspect > 0.4 && aspect < 2.5 ? 'circle' : null;
+            if (corners.length === 3) return 'triangle';
+            if (corners.length === 4) return aspect > 0.78 && aspect < 1.28 ? 'square' : 'rect';
+            return 'circle';
+        }
+        window.classifyStroke = classify;
+
+        /* ---------------- المستويات العشرة ---------------- */
+        // ans: مصفوفة الأشكال المطلوبة بالترتيب (كل عنصر قائمة بدائل مقبولة)
+        const S = (...a) => a;
+        const LEVELS = [
+            { name: 'الخطوط', sub: 'أفقي رأسي مائل', limit: 0, pool: [['ارسم خطاً أفقياً ➖', S(['h'])], ['ارسم خطاً رأسياً ➕', S(['v'])], ['ارسم خطاً مائلاً', S(['d'])]] },
+            { name: 'الأشكال الأولى', sub: 'دائرة مربع مثلث', limit: 0, pool: [['ارسم دائرة ⚪', S(['circle'])], ['ارسم مربعاً ⬜', S(['square'])], ['ارسم مثلثاً 🔺', S(['triangle'])]] },
+            { name: 'المزيد من الأشكال', sub: 'مستطيل ونجمة', limit: 0, pool: [['ارسم مستطيلاً', S(['rect'])], ['ارسم نجمة ⭐', S(['star'])], ['ارسم دائرة', S(['circle'])], ['ارسم مثلثاً', S(['triangle'])], ['ارسم مربعاً', S(['square'])]] },
+            { name: 'خصائص الأشكال', sub: 'أضلاع وزوايا', limit: 0, pool: [['ارسم شكلاً بلا زوايا ولا أضلاع', S(['circle'])], ['ارسم شكلاً له ٣ أضلاع', S(['triangle'])], ['ارسم شكلاً أضلاعه الأربعة متساوية', S(['square'])], ['ارسم شكلاً له ٤ أضلاع غير متساوية (طويل)', S(['rect'])], ['ارسم شكلاً له ٥ رؤوس مدبّبة', S(['star'])]] },
+            { name: 'الحساب والأضلاع', sub: '٢ + ١ ضلعاً', limit: 0, pool: [['ارسم شكلاً عدد أضلاعه ٢ + ١', S(['triangle'])], ['ارسم شكلاً عدد أضلاعه ٦ − ٢', S(['square', 'rect'])], ['ارسم شكلاً عدد أضلاعه ٣ × ١', S(['triangle'])], ['ارسم شكلاً عدد أضلاعه ٨ ÷ ٢', S(['square', 'rect'])], ['ارسم شكلاً عدد أضلاعه ٥ − ٥', S(['circle'])], ['ارسم شكلاً عدد أضلاعه ١ + ٢ + ١', S(['square', 'rect'])]] },
+            { name: 'شكلان بالترتيب', sub: 'دائرة ثم مثلث', limit: 0, seq: 2, shapes: ['circle', 'triangle', 'square', 'rect', 'star'] },
+            { name: 'سباق الأشكال', sub: '٣٠ ثانية', limit: 30, seq: 2, shapes: ['circle', 'triangle', 'square', 'rect', 'star', 'h', 'v'] },
+            { name: 'ثلاثة أشكال', sub: '٣٥ ثانية', limit: 35, seq: 3, shapes: ['circle', 'triangle', 'square', 'rect', 'star'] },
+            { name: 'ألغاز هندسية', sub: 'خصائص وتسلسل', limit: 28, mixed: true },
+            { name: 'الخبير', sub: '٣ أشكال سريعة', limit: 24, seq: 3, shapes: ['circle', 'triangle', 'square', 'rect', 'star', 'h', 'v', 'd'] }
+        ];
+        const AR = { h: 'خطاً أفقياً', v: 'خطاً رأسياً', d: 'خطاً مائلاً', circle: 'دائرة', triangle: 'مثلثاً', square: 'مربعاً', rect: 'مستطيلاً', star: 'نجمة' };
+        const Q_COUNT = 6, MAX_MISSES = 2;
+
+        function genQ(L) {
+            if (L.pool) { const [text, seq] = EDU.pick(L.pool); return { text, seq }; }
+            if (L.mixed) {
+                if (Math.random() < 0.5) { const L4 = LEVELS[3]; const [text, seq] = EDU.pick(L4.pool); return { text, seq }; }
+                const [t1, s1] = EDU.pick(LEVELS[3].pool), a = EDU.pick(['circle', 'square', 'triangle', 'star']);
+                return { text: `${t1.replace('ارسم', 'ارسم أولاً')} ثم ارسم ${AR[a]}`, seq: [s1[0], [a]] };
+            }
+            const arr = []; while (arr.length < L.seq) { const s = EDU.pick(L.shapes); if (!arr.length || arr[arr.length - 1] !== s) arr.push(s); }
+            return { text: 'ارسم ' + arr.map(s => AR[s]).join(' ثم '), seq: arr.map(s => [s]) };
+        }
+
+        /* ---------------- الحالة ---------------- */
+        let level = 0, qi = 0, misses = 0, correct = 0, phase = 'MENU', q = null, step = 0, wrong = 0;
+        let qStart = 0, phaseUntil = 0, msg = '', ok = true, flash = 0, flashC = '', lastT = performance.now(), cameraOK = false;
+        let stroke = [], drawing = false, lastStroke = [], lastShown = 0, result = null;
+        let handPt = null, handPen = false, lastHandT = 0, penFrames = 0, lostFrames = 0, vr = { x: 0, y: 0, w: 1, h: 1 };
+
+        const menu = EDU.init({
+            id: 'ad', title: 'رسّام الهواء', emoji: '✍️', color: '#38bdf8', bg1: '#0c2f55', bg2: '#050a14',
+            levels: LEVELS, onStart: startLevel
+        });
+        function startLevel(i) { level = i; qi = 0; misses = 0; correct = 0; wrong = 0; EDU.fx.list = []; nextQ(performance.now()); }
+        function nextQ(now) {
+            if (qi >= Q_COUNT) return endLevel();
+            q = genQ(LEVELS[level]); step = 0; stroke = []; drawing = false; lastStroke = []; result = null; phase = 'Q'; qStart = now;
+        }
+        function endLevel() {
+            phase = 'MENU';
+            const L = LEVELS[level];
+            let stars;
+            if (L.limit) stars = misses > MAX_MISSES ? 0 : misses === 0 ? 3 : misses === 1 ? 2 : 1;
+            else stars = wrong <= 3 ? 3 : wrong <= 7 ? 2 : 1;
+            menu.finish(stars, `أتممت ${correct} من ${Q_COUNT} مهام${L.limit ? '' : ` • محاولات خاطئة: ${wrong}`}`, level);
+        }
+
+        /* ---------------- القلم: إصبع السبابة أو الفأرة/اللمس ---------------- */
+        function countExt(lm, t, p) { const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y); return d(lm[t], lm[0]) > d(lm[p], lm[0]) * 1.15; }
+        function onHands(res) {
+            const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
+            if (!lm) { handPt = null; handPen = false; return; }
+            lastHandT = performance.now();
+            const pointing = countExt(lm, 8, 6) && !countExt(lm, 12, 10) && !countExt(lm, 16, 14) && !countExt(lm, 20, 18);
+            handPen = pointing;
+            handPt = pointing ? EDU.pt(vr, lm[8]) : null;
+        }
+        let ptrDown = false, ptrPt = null;
+        window.addEventListener('pointerdown', (e) => { if (phase !== 'Q' || (e.target.closest && e.target.closest('button, .edu-overlay'))) return; ptrDown = true; ptrPt = { x: e.clientX, y: e.clientY }; stroke = [ptrPt]; drawing = true; });
+        window.addEventListener('pointermove', (e) => { if (!ptrDown) return; ptrPt = { x: e.clientX, y: e.clientY }; stroke.push(ptrPt); });
+        window.addEventListener('pointerup', () => { if (!ptrDown) return; ptrDown = false; finishStroke(performance.now()); });
+
+        function finishStroke(now) {
+            drawing = false;
+            const pts = stroke; stroke = [];
+            if (phase !== 'Q' || pts.length < 8) return;
+            lastStroke = pts; lastShown = now + 1500;
+            const shape = classify(pts);
+            if (!shape) { result = { shape: null, ok: false }; msg = 'لم أتعرّف على الشكل — حاول ارسمه أكبر وأوضح'; flashFail(now, false); return; }
+            const want = q.seq[step];
+            if (want.includes(shape)) {
+                step++; result = { shape, ok: true };
+                EDU.fx.burst(w / 2, h / 2, ['#38bdf8', '#fde047', '#4ade80'], 24);
+                [660, 880].forEach((f, k) => GC.beep(f, 0.12, 'triangle', 0.16, k * 0.08));
+                if (step >= q.seq.length) { correct++; qi++; phase = 'RES'; phaseUntil = now + 1400; msg = 'ممتاز! أحسنت ✔'; ok = true; flash = 0.3; flashC = '74,222,128'; }
+                else msg = `صحيح ✔ الآن ارسم ${AR[q.seq[step][0]]}`;
+            } else { wrong++; result = { shape, ok: false }; msg = `رسمتَ ${NAMES[shape]} — حاول مرة أخرى`; flashFail(now, true); }
+        }
+        function flashFail(now, count) { flash = 0.25; flashC = '248,113,113'; GC.beep(160, 0.25, 'sawtooth', 0.14, 0, 80); if (!count) { /* لا نعدّ المحاولة غير المعروفة */ } }
+
+        /* ---------------- التحديث ---------------- */
+        function update(now, dt) {
+            if (flash > 0) flash -= dt;
+            if (phase === 'RES') { if (now >= phaseUntil) { if (misses > MAX_MISSES) endLevel(); else nextQ(now); } return; }
+            if (phase !== 'Q') return;
+            // قلم اليد: يبدأ بعد 3 إطارات من وضع السبابة، وينتهي عند ترك الوضع
+            if (!ptrDown && now - lastHandT < 600) {
+                if (handPen && handPt) { penFrames++; lostFrames = 0; if (penFrames >= 3) { drawing = true; stroke.push({ x: handPt.x, y: handPt.y }); } }
+                else { penFrames = 0; lostFrames++; if (drawing && lostFrames >= 5) finishStroke(now); }
+            } else if (!ptrDown && drawing) finishStroke(now);
+            const L = LEVELS[level];
+            if (L.limit && (now - qStart) / 1000 >= L.limit) {
+                misses++; qi++; phase = 'RES'; phaseUntil = now + 1800; msg = 'انتهى الوقت ⏱️'; ok = false; flash = 0.3; flashC = '248,113,113'; stroke = []; drawing = false;
+            }
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function drawShapeIcon(shape, cx, cy, r, col) {
+            ctx.strokeStyle = col; ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.beginPath();
+            if (shape === 'circle') ctx.arc(cx, cy, r, 0, 7);
+            else if (shape === 'square') ctx.rect(cx - r, cy - r, r * 2, r * 2);
+            else if (shape === 'rect') ctx.rect(cx - r * 1.4, cy - r * 0.7, r * 2.8, r * 1.4);
+            else if (shape === 'triangle') { ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy + r); ctx.lineTo(cx - r, cy + r); ctx.closePath(); }
+            else if (shape === 'star') { for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + i * 4 * Math.PI / 5, x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.closePath(); }
+            else if (shape === 'h') { ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); }
+            else if (shape === 'v') { ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r); }
+            else if (shape === 'd') { ctx.moveTo(cx - r, cy + r); ctx.lineTo(cx + r, cy - r); }
+            ctx.stroke();
+        }
+        function trail(pts, col, wd) {
+            if (pts.length < 2) return;
+            ctx.strokeStyle = col; ctx.lineWidth = wd; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.shadowColor = col; ctx.shadowBlur = 16;
+            ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke(); ctx.shadowBlur = 0;
+        }
+        function draw(now, dt) {
+            GC.begin(ctx);
+            ctx.fillStyle = '#0a1220'; ctx.fillRect(0, 0, w, h);
+            vr = EDU.fitRect(video, { x: 0, y: 0, w, h });
+            if (cameraOK) EDU.drawVideo(ctx, video, vr, 0.45);
+            if (phase === 'MENU' || !q) return;
+            ctx.fillStyle = 'rgba(8,14,28,0.35)'; ctx.fillRect(0, 0, w, h);
+            const L = LEVELS[level], fs = Math.max(14, Math.min(w * 0.04, 20));
+            // أثر الرسم
+            if (now < lastShown && lastStroke.length) trail(lastStroke, result && result.ok ? '#4ade80' : '#f87171', 6);
+            if (drawing) trail(stroke, '#38bdf8', 8);
+            // مؤشر السبابة
+            if (handPt && now - lastHandT < 300) { ctx.beginPath(); ctx.arc(handPt.x, handPt.y, 12, 0, 7); ctx.fillStyle = '#fde047'; ctx.shadowColor = '#fde047'; ctx.shadowBlur = 16; ctx.fill(); ctx.shadowBlur = 0; }
+            // الشريط العلوي
+            ctx.fillStyle = 'rgba(8,14,28,0.88)'; ctx.fillRect(0, 0, w, 100);
+            ctx.textBaseline = 'middle'; ctx.font = `700 ${fs}px Tahoma`;
+            ctx.textAlign = 'right'; ctx.fillStyle = '#7dd3fc'; ctx.fillText(`المستوى ${level + 1}: ${L.name}`, w - 12, 20);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#e2e8f0'; ctx.fillText(`${Math.min(qi + (phase === 'Q' ? 1 : 0), Q_COUNT)} / ${Q_COUNT}`, w / 2, 20);
+            ctx.textAlign = 'left'; ctx.fillStyle = '#fca5a5'; ctx.fillText(L.limit ? `✖ ${misses}/${MAX_MISSES + 1}` : `محاولات: ${wrong}`, 118, 20);
+            EDU.text(ctx, q.text, w / 2, 56, Math.max(15, Math.min(w * (q.text.length > 30 ? 0.04 : 0.05), 28)), '#fde047', '#0369a1');
+            // خطوات التسلسل
+            if (q.seq.length > 1) q.seq.forEach((s, i) => { const x = w / 2 + ((q.seq.length - 1) / 2 - i) * 46; drawShapeIcon(s[0], x, 88, 9, i < step ? '#4ade80' : (i === step ? '#fde047' : 'rgba(255,255,255,0.4)')); });
+            if (L.limit) { const f = phase === 'Q' ? Math.max(0, 1 - (now - qStart) / 1000 / L.limit) : 0; ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(12, 96, w - 24, 4); ctx.fillStyle = f < 0.3 ? '#f87171' : '#38bdf8'; ctx.fillRect(12, 96, (w - 24) * f, 4); }
+            // الرسالة
+            EDU.text(ctx, drawing ? 'أنزل سبابتك أو افلت لإنهاء الرسم' : (msg || (cameraOK ? '☝️ ارفع سبابتك فقط وارسم في الهواء' : 'ارسم بالفأرة أو بإصبعك')), w / 2, h - 36, Math.max(14, Math.min(w * 0.04, 20)), result && !result.ok ? '#fca5a5' : '#e2e8f0');
+            if (result && result.shape && now < lastShown) EDU.text(ctx, NAMES[result.shape], w / 2, h * 0.45, Math.max(26, Math.min(w * 0.09, 52)), result.ok ? '#4ade80' : '#f87171', '#000');
+            if (phase === 'RES') { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, h * 0.5 - 30, w, 60); EDU.text(ctx, msg, w / 2, h * 0.5, Math.max(18, Math.min(w * 0.06, 32)), ok ? '#4ade80' : '#fca5a5'); }
+            if (flash > 0) { ctx.fillStyle = `rgba(${flashC},${Math.min(0.2, flash)})`; ctx.fillRect(0, 0, w, h); }
+            EDU.fx.draw(ctx, dt);
+        }
+        function loop(now) { const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now; update(now, dt); draw(now, dt); requestAnimationFrame(loop); }
+
+        const HELP = 'ارسم الأشكال في الهواء: <b>ارفع سبابتك فقط</b> (وأغلق باقي الأصابع) وارسم الشكل المطلوب، ثم أنزل إصبعك لينتهي الرسم. بدون كاميرا ارسم بالفأرة أو بإصبعك على الشاشة.';
+        (async function init() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { menu.ready(HELP); return; }
+            try { await EDU.startHands(video, onHands, 1); cameraOK = true; menu.ready(HELP); }
+            catch (e) { console.error(e); menu.ready(HELP + '<br>تعذر تشغيل الكاميرا — ارسم بالفأرة أو بإصبعك.'); }
+        })();
+        requestAnimationFrame(loop);
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

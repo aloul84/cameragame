@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>سايمون يقول</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="game-common.js"></script>
+    <script src="edu-common.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1a0b2e; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = EDU.makeVideo();
+        let w = 0, h = 0;
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; });
+        const body = EDU.makeBody();
+
+        /* ---------------- الأوضاع (تُكتشف من الجسم) ---------------- */
+        const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+        const vis = (b, ...ids) => ids.every(i => b.P(i).v > 0.45);
+        const TESTS = {
+            nose:  (b) => vis(b, 0, 15, 16) && (dist(b.P(15), b.P(0)) < 0.6 * b.sw || dist(b.P(16), b.P(0)) < 0.6 * b.sw),
+            head:  (b) => vis(b, 0, 15, 16) && [15, 16].every(i => dist(b.P(i), b.P(0)) < 0.85 * b.sw && b.P(i).y < b.P(0).y + 0.3 * b.sw),
+            up:    (b) => vis(b, 0, 15, 16) && [15, 16].every(i => b.P(i).y < b.P(0).y - 0.5 * b.sw && dist(b.P(i), b.P(0)) > 0.95 * b.sw),
+            // اليدان على الخصر: الكوعان إلى الخارج (وإلا تُحسب اليدان المتدليتان خطأً)
+            hips:  (b) => vis(b, 11, 12, 13, 14, 15, 16, 23, 24) && dist(b.P(15), b.P(23)) < 0.8 * b.sw && dist(b.P(16), b.P(24)) < 0.8 * b.sw && b.P(13).x - b.P(11).x > 0.4 * b.sw && b.P(12).x - b.P(14).x > 0.4 * b.sw,
+            knees: (b) => vis(b, 15, 16, 25, 26) && dist(b.P(15), b.P(25)) < 1.0 * b.sw && dist(b.P(16), b.P(26)) < 1.0 * b.sw,
+            arms:  (b) => vis(b, 11, 12, 15, 16) && Math.abs(b.P(15).y - b.P(11).y) < 0.7 * b.sw && Math.abs(b.P(16).y - b.P(12).y) < 0.7 * b.sw && b.P(15).x - b.P(11).x > 1.3 * b.sw && b.P(12).x - b.P(16).x > 1.3 * b.sw,
+            rhand: (b) => vis(b, 11, 12, 15, 16) && b.P(16).y < b.P(12).y - 1.0 * b.sw && b.P(15).y > b.P(11).y + 0.2 * b.sw,
+            lhand: (b) => vis(b, 11, 12, 15, 16) && b.P(15).y < b.P(11).y - 1.0 * b.sw && b.P(16).y > b.P(12).y + 0.2 * b.sw
+        };
+        const HOLD = {
+            nose: ['Touch your nose', 'المس أنفك'], head: ['Hands on your head', 'ضع يديك على رأسك'], up: ['Hands up high', 'ارفع يديك عالياً'],
+            hips: ['Hands on your hips', 'ضع يديك على خصرك'], knees: ['Touch your knees', 'المس ركبتيك'], arms: ['Arms out wide', 'افرد ذراعيك جانباً'],
+            rhand: ['Raise your right hand', 'ارفع يدك اليمنى'], lhand: ['Raise your left hand', 'ارفع يدك اليسرى']
+        };
+        const EVT = { jump: ['Jump', 'اقفز'], clap: ['Clap', 'صفّق'], squat: ['Squat down', 'اجلس القرفصاء'] };
+        const NUMW = ['zero', 'one', 'two', 'three', 'four', 'five'];
+
+        /* ---------------- المستويات العشرة ---------------- */
+        const H = (...ids) => ids.map(id => ({ t: 'hold', id }));
+        const E = (...evs) => evs.map(ev => ({ t: 'ev', ev }));
+        const C = (...evs) => evs.map(ev => ({ t: 'count', ev }));
+        const Q = (...pairs) => pairs.map(p => ({ t: 'seq', evs: p }));
+        const LEVELS = [
+            { name: 'أجزاء الجسم', sub: 'Body parts', simon: 0, win: 8, pool: H('nose', 'head', 'hips', 'up'), lesson: 'تعلّم أوامر الجسم: nose, head, hips, hands.' },
+            { name: 'تحرّك!', sub: 'Move!', simon: 0, win: 7, pool: [...E('jump', 'clap', 'squat'), ...H('up')], lesson: 'jump = اقفز، clap = صفّق، squat = اجلس.' },
+            { name: 'سايمون يقول', sub: 'Simon says', simon: 0.3, win: 6, pool: [...H('nose', 'head', 'hips', 'up'), ...E('jump', 'clap')], lesson: 'نفّذ الأمر فقط إذا بدأ بـ Simon says! وإلا فلا تتحرك.' },
+            { name: 'يمين ويسار', sub: 'Left & Right', simon: 0.25, win: 6, pool: H('rhand', 'lhand', 'arms', 'up', 'nose'), lesson: 'right = يمين، left = يسار.' },
+            { name: 'العدّ', sub: 'Count!', simon: 0.2, win: 8, pool: C('jump', 'clap', 'squat'), lesson: 'one, two, three, four... times = مرات.' },
+            { name: 'مجموعات الحركة', sub: 'Combos', simon: 0.2, win: 8, pool: Q(['jump', 'clap'], ['clap', 'squat'], ['squat', 'jump'], ['clap', 'jump']), lesson: 'then = ثم. نفّذ الحركتين بالترتيب.' },
+            { name: 'تجمّد!', sub: 'Freeze!', simon: 0.3, win: 6, pool: [{ t: 'still' }, ...H('head', 'hips', 'knees'), ...E('jump', 'clap')], lesson: 'Freeze = تجمّد! ثبّت جسمك بلا حركة.' },
+            { name: 'أسرع', sub: 'Faster', simon: 0.35, win: 4.5, pool: [...H('nose', 'head', 'hips', 'up', 'rhand', 'lhand', 'arms'), ...E('jump', 'clap', 'squat'), { t: 'still' }], lesson: 'الوقت أقصر الآن!' },
+            { name: 'خدع سايمون', sub: 'Tricky', simon: 0.4, win: 4, pool: [...H('nose', 'head', 'hips', 'knees', 'up', 'rhand', 'lhand'), ...C('jump', 'clap'), ...Q(['jump', 'clap'], ['clap', 'squat'])], lesson: 'انتبه: بعض الأوامر بلا Simon says!' },
+            { name: 'بطل سايمون', sub: 'Master', simon: 0.4, win: 3.6, pool: [...H('nose', 'head', 'hips', 'knees', 'up', 'rhand', 'lhand', 'arms'), ...C('jump', 'clap', 'squat'), ...Q(['jump', 'clap'], ['squat', 'jump']), { t: 'still' }], lesson: 'التحدي الأخير: سريع وخادع!' }
+        ];
+        const N_CMD = 12, MAX_MISTAKES = 3;
+
+        function makeCmd(L) {
+            let spec = EDU.pick(L.pool), en, ar, key;
+            if (spec.t === 'hold') { [en, ar] = HOLD[spec.id]; key = spec.id; if (spec.id === 'knees' && !(body.lm && body.P(25).v > 0.5)) { spec = { t: 'hold', id: 'hips' }; [en, ar] = HOLD.hips; key = 'hips'; } }
+            else if (spec.t === 'ev') { [en, ar] = EVT[spec.ev]; en = en + '!'; key = spec.ev; }
+            else if (spec.t === 'count') { const n = EDU.rand(2, 4); const [e, a] = EVT[spec.ev]; en = `${e.split(' ')[0]} ${NUMW[n]} times`; ar = `${a} ${EDU.toAr(n)} مرات`; spec = { t: 'count', ev: spec.ev, n }; key = spec.ev + n; }
+            else if (spec.t === 'seq') { const [a, b] = spec.evs; en = `${EVT[a][0].split(' ')[0]}, then ${EVT[b][0].split(' ')[0].toLowerCase()}`; ar = `${EVT[a][1]} ثم ${EVT[b][1]}`; key = a + b; }
+            else { en = 'Freeze!'; ar = 'تجمّد!'; key = 'freeze'; }
+            const simon = Math.random() >= L.simon || spec.t === 'still' && Math.random() < 0.5;
+            return { spec, en, ar, key, simon: L.simon === 0 ? true : simon, prefix: L.simon > 0 };
+        }
+
+        /* ---------------- الحالة ---------------- */
+        let level = 0, qi = 0, mistakes = 0, correct = 0, phase = 'MENU', cmd = null, learned = [];
+        let t0 = 0, holdT = 0, maxHold = 0, phaseUntil = 0, msg = '', ok = true, flash = 0, flashC = '', lastT = performance.now(), cameraOK = false, lastCount = 0;
+
+        const menu = EDU.init({
+            id: 'sy', title: 'سايمون يقول', emoji: '🕴️', color: '#c084fc', bg1: '#4c1d7a', bg2: '#0e0618',
+            levels: LEVELS, onStart: startLevel
+        });
+        function startLevel(i) { level = i; qi = 0; mistakes = 0; correct = 0; learned = []; EDU.fx.list = []; phase = 'INTRO'; phaseUntil = performance.now() + 3200; cmd = null; }
+        function nextCmd(now) {
+            if (qi >= N_CMD) return endLevel();
+            const L = LEVELS[level]; let c = makeCmd(L), tries = 0;
+            while (cmd && c.key === cmd.key && c.simon === cmd.simon && tries++ < 6) c = makeCmd(L);
+            cmd = c; phase = 'CMD'; t0 = now; holdT = 0; maxHold = 0; body.reset(); lastCount = 0;
+            const spoken = (cmd.prefix && cmd.simon ? 'Simon says. ' : '') + cmd.en;
+            EDU.speak(spoken, 'en-US');
+            if (cmd.simon && !learned.some(x => x[0] === cmd.en)) learned.push([cmd.en, cmd.ar]);
+        }
+        function endLevel() {
+            phase = 'MENU'; EDU.speak('', 'en-US');
+            const stars = mistakes >= MAX_MISTAKES ? 0 : mistakes === 0 ? 3 : mistakes === 1 ? 2 : 1;
+            const list = learned.slice(0, 6).map(x => `<b>${x[0].replace('!', '')}</b> = ${x[1]}`).join(' • ');
+            menu.finish(stars, `الأوامر الصحيحة: ${correct} من ${N_CMD}<br><small>${list}</small>`, level);
+        }
+
+        /* ---------------- التقييم ---------------- */
+        function performed(now) {
+            const s = cmd.spec, since = t0 + 250;
+            const evs = body.events.filter(e => e.t >= since);
+            if (s.t === 'hold') return holdT >= 0.5;
+            if (s.t === 'still') return now - body.stillSince >= 1500 && now - t0 > 1500;
+            if (s.t === 'ev') return evs.some(e => e.type === s.ev);
+            if (s.t === 'count') return evs.filter(e => e.type === s.ev).length >= s.n;
+            if (s.t === 'seq') { const i = evs.findIndex(e => e.type === s.evs[0]); return i >= 0 && evs.slice(i + 1).some(e => e.type === s.evs[1]); }
+            return false;
+        }
+        function anyAction(now) {                          // هل بدأ اللاعب تنفيذ الأمر (لحالة الخداع)؟
+            const s = cmd.spec, evs = body.events.filter(e => e.t >= t0 + 250);
+            if (s.t === 'hold') return holdT >= 0.5;
+            if (s.t === 'ev') return evs.some(e => e.type === s.ev);
+            if (s.t === 'count') return evs.some(e => e.type === s.ev);
+            if (s.t === 'seq') return evs.some(e => e.type === s.evs[0]);
+            return false;
+        }
+        function result(now, good, text) {
+            ok = good; msg = text; phase = 'RES'; phaseUntil = now + 1500; qi++;
+            if (good) { correct++; flash = 0.3; flashC = '74,222,128'; EDU.fx.burst(w / 2, h * 0.3, ['#c084fc', '#fde047', '#4ade80'], 34); [660, 880, 1100].forEach((f, k) => GC.beep(f, 0.12, 'triangle', 0.16, k * 0.08)); }
+            else { mistakes++; flash = 0.3; flashC = '248,113,113'; GC.beep(160, 0.3, 'sawtooth', 0.16, 0, 80); GC.vibrate(100); }
+        }
+        function onPose(res) { body.update(res.poseLandmarks || null, performance.now(), video.videoWidth ? video.videoWidth / video.videoHeight : 4 / 3); }
+
+        function update(now, dt) {
+            if (flash > 0) flash -= dt;
+            if (phase === 'INTRO') { if (now >= phaseUntil) nextCmd(now); return; }
+            if (phase === 'RES') { if (now >= phaseUntil) { if (mistakes >= MAX_MISTAKES) endLevel(); else nextCmd(now); } return; }
+            if (phase !== 'CMD') return;
+            const s = cmd.spec;
+            if (s.t === 'hold' && body.lm && now - body.last < 500 && body.vis) { if (TESTS[s.id](body)) holdT += dt; else holdT = Math.max(0, holdT - dt * 2); }
+            const done = performed(now);
+            if (cmd.simon) {
+                if (done) result(now, true, 'أحسنت! ✔');
+                else if ((now - t0) / 1000 >= LEVELS[level].win) result(now, false, `انتهى الوقت — الأمر: ${cmd.ar}`);
+            } else {
+                if (anyAction(now)) result(now, false, 'لم يقل سايمون! ✖ لا تتحرك');
+                else if ((now - t0) / 1000 >= LEVELS[level].win * 0.85) result(now, true, 'أحسنت! لم تتحرك ✔');
+            }
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function draw(now, dt) {
+            GC.begin(ctx);
+            const g = ctx.createLinearGradient(0, 0, w, h); g.addColorStop(0, '#2a0f4a'); g.addColorStop(1, '#0d0620'); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+            for (let i = 0; i < 14; i++) { ctx.fillStyle = `rgba(192,132,252,${0.05 + (i % 3) * 0.02})`; ctx.beginPath(); ctx.arc((i * 137 + now * 0.01 * (i % 4 + 1)) % w, (i * 83) % h, 30 + (i % 4) * 20, 0, 7); ctx.fill(); }
+            if (phase === 'MENU' || !LEVELS[level]) return;
+            const L = LEVELS[level];
+            // الكاميرا في الوسط
+            const area = { x: w * 0.02, y: 150, w: w * 0.96, h: h - 160 };
+            const vr = EDU.fitRect(video, area);
+            ctx.save(); ctx.beginPath(); ctx.roundRect(vr.x, vr.y, vr.w, vr.h, 18); ctx.clip();
+            ctx.fillStyle = '#000'; ctx.fillRect(vr.x, vr.y, vr.w, vr.h);
+            if (cameraOK) EDU.drawVideo(ctx, video, vr, 0.75);
+            if (body.lm && now - body.last < 500) EDU.drawSkeleton(ctx, body.lm, vr, phase === 'RES' ? (ok ? '#4ade80' : '#f87171') : '#c084fc', 5);
+            else EDU.text(ctx, 'قف أمام الكاميرا ليظهر جسمك كاملاً', vr.x + vr.w / 2, vr.y + vr.h / 2, 18, '#fca5a5');
+            ctx.restore();
+            ctx.strokeStyle = 'rgba(192,132,252,0.7)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(vr.x, vr.y, vr.w, vr.h, 18); ctx.stroke();
+            // لوحة سايمون
+            const fs = Math.max(13, Math.min(w * 0.036, 18));
+            ctx.fillStyle = 'rgba(20,8,40,0.9)'; ctx.fillRect(0, 0, w, 144);
+            ctx.textBaseline = 'middle'; ctx.font = `700 ${fs}px Tahoma`;
+            ctx.textAlign = 'right'; ctx.fillStyle = '#d8b4fe'; ctx.fillText(`المستوى ${level + 1}: ${L.name} — ${L.sub}`, w - 12, 18);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#e2e8f0'; ctx.fillText(`${Math.min(qi + (phase === 'CMD' ? 1 : 0), N_CMD)} / ${N_CMD}`, w / 2, 18);
+            ctx.textAlign = 'left'; ctx.fillText('❤️'.repeat(MAX_MISTAKES - mistakes) + '🖤'.repeat(mistakes), 118, 18);
+            if (cmd && (phase === 'CMD' || phase === 'RES')) {
+                const crown = cmd.prefix && cmd.simon;
+                ctx.font = '40px Arial'; ctx.textAlign = 'center'; ctx.fillText('🕴️', w - 44, 80);
+                const big = Math.max(22, Math.min(w * (cmd.en.length > 22 ? 0.055 : 0.07), 40));
+                ctx.fillStyle = crown ? 'rgba(250,204,21,0.18)' : 'rgba(255,255,255,0.08)'; ctx.beginPath(); ctx.roundRect(16, 36, w - 100, 92, 18); ctx.fill();
+                if (crown) { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 3; ctx.stroke(); }
+                EDU.text(ctx, (crown ? '👑 Simon says: ' : '') + cmd.en, (w - 100) / 2 + 16, 72, big, crown ? '#fde047' : '#fff', crown ? '#a16207' : null);
+                EDU.text(ctx, cmd.ar, (w - 100) / 2 + 16, 108, Math.max(14, big * 0.5), '#c4b5fd');
+                if (phase === 'CMD') { const f = Math.max(0, 1 - (now - t0) / 1000 / L.win); ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(16, 134, w - 32, 5); ctx.fillStyle = f < 0.3 ? '#f87171' : '#c084fc'; ctx.fillRect(16, 134, (w - 32) * f, 5); }
+                if (phase === 'CMD' && cmd.spec.t === 'hold' && holdT > 0) { ctx.fillStyle = '#4ade80'; ctx.fillRect(vr.x, vr.y + vr.h - 8, vr.w * Math.min(1, holdT / 0.5), 8); }
+                if (phase === 'CMD' && cmd.spec.t === 'count') { const c = body.events.filter(e => e.t >= t0 + 250 && e.type === cmd.spec.ev).length; for (let i = 0; i < cmd.spec.n; i++) { ctx.beginPath(); ctx.arc(vr.x + vr.w / 2 + (i - (cmd.spec.n - 1) / 2) * 36, vr.y + vr.h - 30, 12, 0, 7); ctx.fillStyle = i < c ? '#4ade80' : 'rgba(255,255,255,0.25)'; ctx.fill(); } }
+            }
+            if (phase === 'INTRO') { ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(0, h * 0.4, w, 110); EDU.text(ctx, L.lesson, w / 2, h * 0.4 + 36, Math.max(15, Math.min(w * 0.045, 24)), '#fde047'); EDU.text(ctx, 'استمع إلى سايمون وانظر إلى النص', w / 2, h * 0.4 + 76, Math.max(12, Math.min(w * 0.032, 17)), '#e2e8f0'); }
+            if (phase === 'RES') { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, h * 0.5 - 30, w, 60); EDU.text(ctx, msg, w / 2, h * 0.5, Math.max(17, Math.min(w * 0.055, 30)), ok ? '#4ade80' : '#fca5a5'); }
+            if (flash > 0) { ctx.fillStyle = `rgba(${flashC},${Math.min(0.2, flash)})`; ctx.fillRect(0, 0, w, h); }
+            EDU.fx.draw(ctx, dt);
+        }
+        function loop(now) { const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now; update(now, dt); draw(now, dt); requestAnimationFrame(loop); }
+
+        const HELP = 'تعلّم الإنجليزية بالحركة! يعطيك سايمون أوامر بالإنجليزية (مكتوبة ومنطوقة): نفّذها بجسمك. <b>لكن لا تنفّذ إلا إذا قال Simon says</b> 👑! قف على بعد مترين ليظهر جسمك كاملاً.';
+        (async function init() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { menu.ready(HELP + '<br>هذه اللعبة تحتاج كاميرا.'); return; }
+            try { await EDU.startPose(video, onPose); cameraOK = true; menu.ready(HELP); }
+            catch (e) { console.error(e); menu.ready(HELP + '<br>تعذر تشغيل الكاميرا — هذه اللعبة تحتاجها.'); }
+        })();
+        requestAnimationFrame(loop);
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

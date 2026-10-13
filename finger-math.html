@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>حاسب الأصابع</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="game-common.js"></script>
+    <script src="edu-common.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #08101f; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = EDU.makeVideo();
+        let w = 0, h = 0, portrait = false;
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; portrait = h > w * 1.1; });
+
+        /* ---------------- المستويات العشرة ---------------- */
+        const LEVELS = [
+            { name: 'عدّ بالأصابع', sub: '١ - ٥', time: 0 },
+            { name: 'عدّ حتى ١٠', sub: 'اليدان معاً', time: 0 },
+            { name: 'جمع صغير', sub: 'حتى ٦', time: 16 },
+            { name: 'جمع حتى ١٠', sub: '', time: 14 },
+            { name: 'طرح صغير', sub: 'حتى ٦', time: 15 },
+            { name: 'طرح حتى ١٠', sub: '', time: 13 },
+            { name: 'جدول الضرب', sub: '×٢ ×٣ ×٥', time: 14 },
+            { name: 'الرقم الناقص', sub: '٣ + ؟ = ٨', time: 12 },
+            { name: 'مزيج', sub: '+ − ×', time: 11 },
+            { name: 'التحدي', sub: 'سريع', time: 8 }
+        ];
+        const Q_COUNT = 8, MAX_MISTAKES = 3, HOLD = 0.9;
+        const OBJ = ['🍎', '⭐', '🐟', '🎈', '🍪', '🚗', '🌸', '🐥'];
+        const MUL = [[2, 1], [2, 2], [2, 3], [2, 4], [2, 5], [3, 1], [3, 2], [3, 3], [5, 1], [5, 2], [4, 1], [4, 2]];
+
+        function genQ(lv) {
+            const R = EDU.rand;
+            const add = (max) => { const a = R(1, max - 1), b = R(1, max - a); return { text: `${EDU.toAr(a)} + ${EDU.toAr(b)} = ؟`, ans: a + b }; };
+            const sub = (max) => { const a = R(2, max), b = R(0, a - 1); return { text: `${EDU.toAr(a)} − ${EDU.toAr(b)} = ؟`, ans: a - b }; };
+            const mul = () => { const [a, b] = EDU.pick(MUL); return { text: `${EDU.toAr(a)} × ${EDU.toAr(b)} = ؟`, ans: a * b }; };
+            const miss = () => { const c = R(3, 10), a = R(1, c - 1); return { text: `${EDU.toAr(a)} + ؟ = ${EDU.toAr(c)}`, ans: c - a }; };
+            if (lv <= 1) { const n = lv === 0 ? R(1, 5) : R(1, 10); return { count: n, emoji: EDU.pick(OBJ), text: 'كم عدد العناصر؟', ans: n }; }
+            if (lv === 2) return add(6);
+            if (lv === 3) return add(10);
+            if (lv === 4) return sub(6);
+            if (lv === 5) return sub(10);
+            if (lv === 6) return mul();
+            if (lv === 7) return miss();
+            if (lv === 8) return EDU.pick([() => add(10), () => sub(10), () => miss()])();
+            return EDU.pick([() => add(10), () => sub(10), mul, miss])();
+        }
+
+        /* ---------------- الحالة ---------------- */
+        let level = 0, qi = 0, mistakes = 0, correct = 0, q = null, phase = 'MENU';
+        let tLeft = 0, phaseUntil = 0, msg = '', flash = 0, flashC = '';
+        let hands = [], lastHandT = 0;
+        let detected = null, candidate = null, stableT = 0, lastSubmitted = null, armed = true;
+        let cameraOK = false, lastT = performance.now();
+
+        const menu = EDU.init({
+            id: 'fm', title: 'حاسب الأصابع', emoji: '🖐️', color: '#38bdf8', bg1: '#0c2a4d', bg2: '#050b18',
+            desc: '', levels: LEVELS, onStart: startLevel
+        });
+
+        function startLevel(i) {
+            level = i; qi = 0; mistakes = 0; correct = 0;
+            EDU.fx.list = [];
+            nextQuestion();
+        }
+        function nextQuestion() {
+            if (qi >= Q_COUNT) return endLevel();
+            q = genQ(level);
+            phase = 'Q';
+            tLeft = LEVELS[level].time;
+            candidate = null; stableT = 0; armed = false; lastSubmitted = null;
+        }
+        function endLevel() {
+            phase = 'MENU';
+            const stars = mistakes >= MAX_MISTAKES ? 0 : mistakes === 0 ? 3 : mistakes === 1 ? 2 : 1;
+            menu.finish(stars, `الإجابات الصحيحة: ${correct} من ${Q_COUNT}`, level);
+        }
+
+        function submit(val, now, source) {
+            if (phase !== 'Q') return;
+            if (val === q.ans) {
+                correct++; qi++; phase = 'OK'; phaseUntil = now + 1100; msg = 'أحسنت! ✔'; flashC = '74,222,128'; flash = 0.3;
+                const cx = w / 2, cy = h * 0.3; EDU.fx.burst(cx, cy, ['#4ade80', '#38bdf8', '#fde047'], 30);
+                [660, 880].forEach((f, k) => GC.beep(f, 0.12, 'triangle', 0.16, k * 0.09));
+            } else wrong(now, `الإجابة الصحيحة: ${EDU.toAr(q.ans)}`);
+            lastSubmitted = val;
+        }
+        function wrong(now, text) {
+            mistakes++; qi++; phase = 'BAD'; phaseUntil = now + 1700; msg = text; flashC = '248,113,113'; flash = 0.3;
+            GC.beep(160, 0.3, 'sawtooth', 0.16, 0, 80); GC.vibrate(100);
+        }
+
+        /* ---------------- عدّ الأصابع ---------------- */
+        function countHand(lm) {
+            const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+            const wr = lm[0], palm = d(lm[0], lm[9]) || 0.1;
+            let n = 0;
+            [[8, 6], [12, 10], [16, 14], [20, 18]].forEach(([t, p]) => { if (d(lm[t], wr) > d(lm[p], wr) * 1.12) n++; });
+            // الإبهام: ممدود إذا ابتعدت قمته عن قاعدة السبابة وعن راحة اليد
+            if (d(lm[4], lm[17]) > d(lm[3], lm[17]) * 1.05 && d(lm[4], lm[5]) > palm * 0.5) n++;
+            return n;
+        }
+        function onHands(res) {
+            hands = res.multiHandLandmarks || [];
+            if (hands.length) lastHandT = performance.now();
+            detected = hands.length ? Math.min(10, hands.reduce((s, lm) => s + countHand(lm), 0)) : null;
+        }
+
+        /* ---------------- الإدخال باللمس: لوحة الأرقام ---------------- */
+        function padLayout() {
+            const n = 11, cols = portrait ? 6 : 11, rows = Math.ceil(n / cols);
+            const size = Math.min(60, (w - 24) / cols - 8), gap = 8;
+            const totalW = cols * (size + gap) - gap, y0 = h - 74 - rows * (size + gap) + gap;
+            const out = [];
+            for (let i = 0; i < n; i++) {
+                const r = Math.floor(i / cols), c = i % cols;
+                const inRow = r === rows - 1 ? n - r * cols : cols;
+                const rowW = inRow * (size + gap) - gap;
+                out.push({ v: i, x: w / 2 - rowW / 2 + c * (size + gap), y: y0 + r * (size + gap), s: size });
+            }
+            return out;
+        }
+        window.addEventListener('pointerdown', (e) => {
+            if (phase !== 'Q' || (e.target.closest && e.target.closest('button, .edu-overlay'))) return;
+            const b = padLayout().find(p => e.clientX >= p.x && e.clientX <= p.x + p.s && e.clientY >= p.y && e.clientY <= p.y + p.s);
+            if (b) submit(b.v, performance.now(), 'pad');
+        });
+
+        /* ---------------- التحديث ---------------- */
+        function update(now, dt) {
+            if (flash > 0) flash -= dt;
+            if (phase === 'OK' || phase === 'BAD') { if (now >= phaseUntil) { if (qi >= Q_COUNT || mistakes >= MAX_MISTAKES) endLevel(); else nextQuestion(); } return; }
+            if (phase !== 'Q') return;
+            if (LEVELS[level].time) {
+                tLeft -= dt;
+                if (tLeft <= 0) { wrong(now, `انتهى الوقت! الإجابة: ${EDU.toAr(q.ans)}`); return; }
+            }
+            // تثبيت الإجابة بالأصابع
+            const handsVisible = now - lastHandT < 400 && detected !== null;
+            if (!handsVisible) { candidate = null; stableT = 0; armed = true; return; }
+            if (detected === candidate) stableT += dt; else { candidate = detected; stableT = 0; }
+            if (!armed && candidate !== lastSubmitted) armed = true;
+            if (armed && stableT >= HOLD) { armed = false; submit(candidate, now, 'hand'); }
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function drawQuestion(now) {
+            const L = LEVELS[level];
+            const boxW = Math.min(w * 0.92, 640), boxH = portrait ? h * 0.26 : h * 0.32, bx = w / 2 - boxW / 2, by = 64;
+            ctx.fillStyle = 'rgba(8,16,31,0.78)'; ctx.beginPath(); ctx.roundRect(bx, by, boxW, boxH, 22); ctx.fill();
+            ctx.strokeStyle = 'rgba(56,189,248,0.6)'; ctx.lineWidth = 2; ctx.stroke();
+            if (q.count) {
+                EDU.text(ctx, q.text, w / 2, by + 24, Math.max(16, Math.min(w * 0.045, 24)), '#bae6fd');
+                const n = q.count, perRow = n > 5 ? 5 : n, rows = n > 5 ? 2 : 1;
+                const sz = Math.min((boxW - 40) / 5.4, (boxH - 50) / (rows * 1.2), 70);
+                ctx.font = `${sz}px Arial`;
+                for (let i = 0; i < n; i++) {
+                    const r = Math.floor(i / 5), c = i % 5, inRow = r === 0 ? Math.min(5, n) : n - 5;
+                    const x = w / 2 + ((inRow - 1) / 2 - c) * sz * 1.25, y = by + 30 + boxH * 0.5 + (r - (rows - 1) / 2) * sz * 1.15;
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(q.emoji, x, y + Math.sin(now / 300 + i) * 3);
+                }
+            } else {
+                ctx.save(); ctx.direction = 'ltr';
+                EDU.text(ctx, q.text, w / 2, by + boxH / 2, Math.max(34, Math.min(boxW / 7, boxH * 0.5)), '#fff', '#38bdf8');
+                ctx.restore();
+            }
+        }
+
+        function drawDetect(now) {
+            const pad = padLayout(), padTop = Math.min(...pad.map(p => p.y));
+            const cy = (64 + (portrait ? h * 0.26 : h * 0.32) + padTop) / 2 + 6, r = Math.max(34, Math.min(70, (padTop - (64 + (portrait ? h * 0.26 : h * 0.32))) * 0.4));
+            const visible = detected !== null && now - lastHandT < 400;
+            ctx.beginPath(); ctx.arc(w / 2, cy, r, 0, 7); ctx.fillStyle = 'rgba(8,16,31,0.75)'; ctx.fill();
+            ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.stroke();
+            if (visible && phase === 'Q') {
+                ctx.beginPath(); ctx.arc(w / 2, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, stableT / HOLD));
+                ctx.strokeStyle = armed || candidate !== lastSubmitted ? '#4ade80' : '#facc15'; ctx.stroke();
+            }
+            EDU.text(ctx, visible ? EDU.toAr(detected) : '✋', w / 2, cy, r * 1.1, visible ? '#fff' : '#94a3b8');
+            EDU.text(ctx, visible ? 'ثبّت الإجابة بأصابعك' : 'ارفع يدك أو اضغط رقماً', w / 2, cy + r + 18, Math.max(13, Math.min(w * 0.035, 18)), '#cbd5e1');
+        }
+
+        function drawPad() {
+            padLayout().forEach(p => {
+                const on = detected === p.v && phase === 'Q';
+                ctx.fillStyle = on ? '#38bdf8' : 'rgba(255,255,255,0.12)';
+                ctx.beginPath(); ctx.roundRect(p.x, p.y, p.s, p.s, 12); ctx.fill();
+                EDU.text(ctx, EDU.toAr(p.v), p.x + p.s / 2, p.y + p.s / 2, p.s * 0.5, on ? '#04141a' : '#fff');
+            });
+        }
+
+        function draw(now, dt) {
+            GC.begin(ctx);
+            ctx.fillStyle = '#08101f'; ctx.fillRect(0, 0, w, h);
+            const vr = EDU.fitRect(video, { x: 0, y: 0, w, h });
+            if (cameraOK) EDU.drawVideo(ctx, video, vr, 0.32);
+            // اليدان
+            hands.forEach((lm, k) => {
+                ctx.fillStyle = k ? '#f472b6' : '#4ade80';
+                lm.forEach((l, i) => { const p = EDU.pt(vr, l); ctx.beginPath(); ctx.arc(p.x, p.y, i % 4 === 0 && i > 0 ? 7 : 4, 0, 7); ctx.fill(); });
+            });
+            if (phase === 'MENU') return;
+            if (flash > 0) { ctx.fillStyle = `rgba(${flashC},${Math.min(0.22, flash)})`; ctx.fillRect(0, 0, w, h); }
+            // الشريط العلوي
+            const fs = Math.max(14, Math.min(w * 0.04, 20));
+            ctx.textBaseline = 'middle'; ctx.font = `700 ${fs}px Tahoma`;
+            ctx.textAlign = 'right'; ctx.fillStyle = '#7dd3fc'; ctx.fillText(`المستوى ${level + 1}: ${LEVELS[level].name}`, w - 12, 24);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#e2e8f0'; ctx.fillText(`السؤال ${Math.min(qi + (phase === 'Q' ? 1 : 0), Q_COUNT)} / ${Q_COUNT}`, w / 2, 24);
+            ctx.textAlign = 'left'; ctx.fillText('❤️'.repeat(MAX_MISTAKES - mistakes) + '🖤'.repeat(mistakes), 118, 24);
+            if (LEVELS[level].time && phase === 'Q') {
+                const f = Math.max(0, tLeft / LEVELS[level].time);
+                ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(12, 46, w - 24, 6);
+                ctx.fillStyle = f < 0.3 ? '#f87171' : '#38bdf8'; ctx.fillRect(12, 46, (w - 24) * f, 6);
+            }
+            if (q) drawQuestion(now);
+            drawDetect(now);
+            drawPad();
+            if (phase === 'OK' || phase === 'BAD') {
+                ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, h * 0.42, w, 70);
+                EDU.text(ctx, msg, w / 2, h * 0.42 + 35, Math.max(22, Math.min(w * 0.07, 40)), phase === 'OK' ? '#4ade80' : '#fca5a5');
+            }
+            EDU.fx.draw(ctx, dt);
+        }
+
+        function loop(now) {
+            const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now;
+            update(now, dt);
+            draw(now, dt);
+            requestAnimationFrame(loop);
+        }
+
+        /* ---------------- الكاميرا ---------------- */
+        const HELP = 'أظهر الإجابة بأصابعك أمام الكاميرا (اليدان معاً حتى ١٠) وثبّتها لحظة. أو اضغط الرقم على الشاشة.';
+        (async function init() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { menu.ready(HELP + '<br>الكاميرا غير متاحة — استخدم الأرقام على الشاشة.'); return; }
+            try { await EDU.startHands(video, onHands, 2); cameraOK = true; menu.ready(HELP); }
+            catch (e) { console.error(e); menu.ready(HELP + '<br>تعذر تشغيل الكاميرا — استخدم الأرقام على الشاشة.'); }
+        })();
+        requestAnimationFrame(loop);
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

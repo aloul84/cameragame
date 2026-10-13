@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>كنز الاتجاهات</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="game-common.js"></script>
+    <script src="edu-common.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #062a3a; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = EDU.makeVideo();
+        let w = 0, h = 0, portrait = false;
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; portrait = h > w * 1.05; });
+
+        /* ---------------- الاتجاهات والمستويات ---------------- */
+        const DIRS = { N: { dx: 0, dy: -1, n: 'شمالاً', k: 'الشمال' }, E: { dx: 1, dy: 0, n: 'شرقاً', k: 'الشرق' }, S: { dx: 0, dy: 1, n: 'جنوباً', k: 'الجنوب' }, W: { dx: -1, dy: 0, n: 'غرباً', k: 'الغرب' } };
+        const LEVELS = [
+            { name: 'الاتجاهات الأربعة', sub: 'شمال جنوب شرق غرب', size: 5, obs: 0, mode: 'full', rot: 0, lesson: 'اتّبع المسار المكتوب خطوة بخطوة.' },
+            { name: 'رحلة أطول', sub: 'مسار متعرّج', size: 6, obs: 0, mode: 'full', rot: 0, lesson: 'عدّ الخطوات بعناية.' },
+            { name: 'صخور في الطريق', sub: 'تجنّب العوائق', size: 6, obs: 4, mode: 'full', rot: 0, lesson: 'المسار يلتفّ حول الصخور 🪨.' },
+            { name: 'جزيرة النخيل', sub: 'مسار أصعب', size: 7, obs: 8, mode: 'full', rot: 0, lesson: 'الصخور والنخيل تسدّ الطريق.' },
+            { name: 'الكنز بالإحداثيات', sub: '٣ شرقاً ٢ شمالاً', size: 6, obs: 3, mode: 'offset', rot: 0, lesson: 'اعرف موضع الكنز من فرق الاتجاهات، ثم اختر طريقك.' },
+            { name: 'إحداثيات صعبة', sub: 'عوائق أكثر', size: 7, obs: 7, mode: 'offset', rot: 0, lesson: 'اختر أقصر طريق يتجنّب الصخور.' },
+            { name: 'المحطة الأولى', sub: 'مرّ بالمنارة أولاً', size: 7, obs: 5, mode: 'landmark', rot: 0, lesson: 'اذهب إلى المنارة 🗼 أولاً ثم إلى الكنز.' },
+            { name: 'خريطة مقلوبة', sub: 'ابحث عن الشمال', size: 6, obs: 3, mode: 'full', rot: 90, lesson: 'الخريطة مدارة! انظر إلى بوصلة الخريطة لتعرف أين الشمال.' },
+            { name: 'بوصلة مقلوبة', sub: 'إحداثيات + دوران', size: 7, obs: 5, mode: 'offset', rot: 180, lesson: 'الشمال هنا إلى الأسفل! اعتمد على البوصلة.' },
+            { name: 'القبطان', sub: 'المنارة والدوران', size: 8, obs: 8, mode: 'landmark', rot: 270, lesson: 'التحدّي الأخير: منارة، دوران، وصخور.' }
+        ];
+        const MAPS = 3;
+
+        /* ---------------- توليد الخريطة ---------------- */
+        function bfs(map, from, to) {
+            const q = [from], prev = {}; prev[from.y * map.size + from.x] = null;
+            while (q.length) {
+                const c = q.shift();
+                if (c.x === to.x && c.y === to.y) { const path = []; for (let p = c; p; p = prev[p.y * map.size + p.x]) path.unshift(p); return path; }
+                for (const k in DIRS) {
+                    const n = { x: c.x + DIRS[k].dx, y: c.y + DIRS[k].dy };
+                    if (n.x < 0 || n.y < 0 || n.x >= map.size || n.y >= map.size || map.rocks[n.y * map.size + n.x] || (n.y * map.size + n.x) in prev) continue;
+                    prev[n.y * map.size + n.x] = c; q.push(n);
+                }
+            }
+            return null;
+        }
+        function dirOf(a, b) { return Object.keys(DIRS).find(k => DIRS[k].dx === b.x - a.x && DIRS[k].dy === b.y - a.y); }
+        function stepsWord(n) { return n === 1 ? 'خطوة' : n === 2 ? 'خطوتان' : 'خطوات'; }
+        function legText(a, b, path) {          // مسار مفصّل
+            const out = []; let last = null, cnt = 0;
+            for (let i = 1; i < path.length; i++) { const d = dirOf(path[i - 1], path[i]); if (d === last) cnt++; else { if (last) out.push([last, cnt]); last = d; cnt = 1; } }
+            if (last) out.push([last, cnt]);
+            return out.map(([d, c]) => `${EDU.toAr(c)} ${c <= 2 ? stepsWord(c) : 'خطوات'} ${DIRS[d].n}`).join('  ←  ');
+        }
+        function offsetText(a, b) {
+            const dx = b.x - a.x, dy = b.y - a.y, out = [];
+            if (dx) out.push(`${EDU.toAr(Math.abs(dx))} ${stepsWord(Math.abs(dx))} ${dx > 0 ? DIRS.E.n : DIRS.W.n}`);
+            if (dy) out.push(`${EDU.toAr(Math.abs(dy))} ${stepsWord(Math.abs(dy))} ${dy > 0 ? DIRS.S.n : DIRS.N.n}`);
+            return out.join(' و ');
+        }
+        function genMap(L) {
+            for (let attempt = 0; attempt < 200; attempt++) {
+                const n = L.size, R = EDU.rand;
+                const start = { x: R(0, n - 1), y: R(0, n - 1) }, goal = { x: R(0, n - 1), y: R(0, n - 1) };
+                const md = Math.abs(start.x - goal.x) + Math.abs(start.y - goal.y);
+                if (md < Math.max(3, n - 1)) continue;
+                const map = { size: n, rocks: {}, start, goal, wp: null, wpDone: false };
+                const used = new Set([start.y * n + start.x, goal.y * n + goal.x]);
+                if (L.mode === 'landmark') { map.wp = { x: R(0, n - 1), y: R(0, n - 1) }; const k = map.wp.y * n + map.wp.x; if (used.has(k) || Math.abs(map.wp.x - start.x) + Math.abs(map.wp.y - start.y) < 2 || Math.abs(map.wp.x - goal.x) + Math.abs(map.wp.y - goal.y) < 2) continue; used.add(k); }
+                let placed = 0, guard = 0;
+                while (placed < L.obs && guard++ < 200) { const x = R(0, n - 1), y = R(0, n - 1), k = y * n + x; if (used.has(k) || map.rocks[k]) continue; map.rocks[k] = Math.random() < 0.5 ? '🪨' : '🌴'; placed++; }
+                const stops = map.wp ? [start, map.wp, goal] : [start, goal];
+                let paths = [], ok = true, opt = 0;
+                for (let i = 1; i < stops.length; i++) { const p = bfs(map, stops[i - 1], stops[i]); if (!p) { ok = false; break; } paths.push(p); opt += p.length - 1; }
+                if (!ok) continue;
+                map.opt = opt;
+                if (L.mode === 'full') map.text = paths.map((p, i) => (map.wp && i === 0 ? 'إلى المنارة: ' : (map.wp ? 'ثم إلى الكنز: ' : '')) + legText(null, null, p)).join('   |   ');
+                else if (L.mode === 'offset') map.text = `الكنز يبعد عن موضعك: ${offsetText(start, goal)}`;
+                else map.text = `اذهب إلى المنارة 🗼 (${offsetText(start, map.wp)}) ثم إلى الكنز (${offsetText(map.wp, goal)})`;
+                return map;
+            }
+            return null;
+        }
+
+        /* ---------------- الحالة ---------------- */
+        let level = 0, mi = 0, map = null, pos = null, steps = 0, extra = 0, phase = 'MENU';
+        let anim = null, trail = [], bump = 0, msg = '', phaseUntil = 0, flash = 0, lastT = performance.now(), cameraOK = false;
+        const body = EDU.makeBody();
+
+        const menu = EDU.init({
+            id: 'tc', title: 'كنز الاتجاهات', emoji: '🧭', color: '#fbbf24', bg1: '#0c4a5e', bg2: '#04141c',
+            levels: LEVELS, onStart: startLevel
+        });
+        function startLevel(i) { level = i; mi = 0; extra = 0; EDU.fx.list = []; newMap(performance.now()); }
+        function newMap(now) {
+            map = genMap(LEVELS[level]); pos = { x: map.start.x, y: map.start.y }; steps = 0; trail = []; anim = null;
+            phase = 'INTRO'; phaseUntil = now + (mi === 0 ? 3200 : 1800);
+        }
+        function endLevel() {
+            phase = 'MENU';
+            const stars = extra <= 2 ? 3 : extra <= 6 ? 2 : 1;
+            menu.finish(stars, `خطوات زائدة أو اصطدامات: ${extra}`, level);
+        }
+
+        /* ---------------- التحويل بين الخريطة والشاشة (دوران بمضاعفات ٩٠°) ---------------- */
+        function toScreenCell(x, y) {
+            const n = map.size, rot = LEVELS[level].rot;
+            if (rot === 90) return { x: n - 1 - y, y: x };
+            if (rot === 180) return { x: n - 1 - x, y: n - 1 - y };
+            if (rot === 270) return { x: y, y: n - 1 - x };
+            return { x, y };
+        }
+        function screenVec(k) { let v = [DIRS[k].dx, DIRS[k].dy]; for (let i = 0; i < LEVELS[level].rot / 90; i++) v = [-v[1], v[0]]; return v; }
+        function northOnScreen() { const r = LEVELS[level].rot; return r === 90 ? 'E' : r === 180 ? 'S' : r === 270 ? 'W' : 'N'; }
+        let board = { x: 0, y: 0, s: 1 };
+        function layout() {
+            const top = 110, bot = portrait ? 150 : 24, aw = portrait ? w - 20 : w - 260, ah = h - top - bot;
+            const s = Math.max(30, Math.min(aw, ah));
+            board = { x: portrait ? (w - s) / 2 : (w - 240 - s) / 2 + 10, y: top + (ah - s) / 2, s };
+        }
+        const cellPx = () => board.s / map.size;
+
+        /* ---------------- الحركة ---------------- */
+        function tryMove(k, now) {
+            if (phase !== 'PLAY' || anim) return;
+            const d = DIRS[k], n = { x: pos.x + d.dx, y: pos.y + d.dy };
+            if (n.x < 0 || n.y < 0 || n.x >= map.size || n.y >= map.size || map.rocks[n.y * map.size + n.x]) {
+                bump = 0.3; extra++; steps++; flash = 0.25; GC.beep(150, 0.2, 'sawtooth', 0.14, 0, 90); GC.vibrate(60); return;
+            }
+            anim = { from: { x: pos.x, y: pos.y }, to: n, t0: now };
+            trail.push({ x: pos.x, y: pos.y }); pos = n; steps++;
+            GC.beep(520 + trail.length * 20, 0.07, 'triangle', 0.12);
+        }
+        function reachCheck(now) {
+            if (map.wp && !map.wpDone && pos.x === map.wp.x && pos.y === map.wp.y) { map.wpDone = true; msg = 'وصلت إلى المنارة! 🗼 أكمل نحو الكنز'; EDU.fx.burst(w / 2, h / 2, ['#fbbf24', '#fff'], 20); GC.beep(784, 0.15, 'triangle', 0.15); }
+            if (pos.x === map.goal.x && pos.y === map.goal.y && (!map.wp || map.wpDone)) {
+                extra += Math.max(0, steps - map.opt);
+                mi++; phase = 'WIN'; phaseUntil = now + 2200; msg = `وجدت الكنز! 💰 (${EDU.toAr(steps)} خطوة — الأقصر ${EDU.toAr(map.opt)})`;
+                const c = toScreenCell(pos.x, pos.y); EDU.fx.burst(board.x + (c.x + 0.5) * cellPx(), board.y + (c.y + 0.5) * cellPx(), ['#fde047', '#f59e0b', '#fff'], 50);
+                [523, 659, 784, 1047].forEach((f, k) => GC.beep(f, 0.15, 'triangle', 0.16, k * 0.09));
+            }
+        }
+
+        /* ---------------- قراءة اتجاه الجسم ---------------- */
+        function onPose(res) { body.update(res.poseLandmarks || null, performance.now(), video.videoWidth ? video.videoWidth / video.videoHeight : 4 / 3); }
+        // شمال: ذراع للأعلى | شرق: ذراعك اليمنى جانباً | غرب: اليسرى جانباً | جنوب: تقاطع الذراعين على الصدر
+        function bodyDir(now) {
+            if (!body.lm || now - body.last > 600 || !body.vis) return null;
+            const P = body.P, sw = body.sw || 0.1, shY = (P(11).y + P(12).y) / 2;
+            const arm = (s, e) => { const dx = P(e).x - P(s).x, dy = P(e).y - P(s).y; return { dx, dy, len: Math.hypot(dx, dy) }; };
+            const L = arm(11, 15), R = arm(12, 16);
+            const wyAvg = (P(15).y + P(16).y) / 2;
+            if (P(15).x < P(16).x - 0.15 * sw && wyAvg > shY + 0.2 * sw && wyAvg < shY + 2.6 * sw) return 'S';
+            const up = (a) => a.len > 1.0 * sw && a.dy < -0.9 * sw && Math.abs(a.dx) < 0.75 * Math.abs(a.dy);
+            const east = R.len > 1.0 * sw && R.dx < -0.9 * sw && Math.abs(R.dy) < 0.6 * Math.abs(R.dx);
+            const west = L.len > 1.0 * sw && L.dx > 0.9 * sw && Math.abs(L.dy) < 0.6 * Math.abs(L.dx);
+            if (up(L) || up(R)) return 'N';
+            if (east && !west) return 'E';
+            if (west && !east) return 'W';
+            return null;
+        }
+
+        /* ---------------- إدخال بديل: لمس البوصلة أو الأسهم ---------------- */
+        function dpad() { const s = portrait ? Math.min(60, w / 7) : 62, cx = portrait ? w / 2 : w - 120, cy = portrait ? h - 76 : h - 130; return { s, cx, cy }; }
+        function dpadHit(x, y) {
+            const { s, cx, cy } = dpad(), nS = northOnScreen();
+            const scr = { up: [0, -1], right: [1, 0], down: [0, 1], left: [-1, 0] };
+            // الأزرار على الشاشة: أعلى/يمين/أسفل/يسار، لكل منها اتجاه بوصلة حسب دوران الخريطة
+            for (const [name, v] of Object.entries(scr)) {
+                const bx = cx + v[0] * s * 1.15, by = cy + v[1] * s * 1.15;
+                if (Math.abs(x - bx) <= s / 2 && Math.abs(y - by) <= s / 2) return screenToCompass(v);
+            }
+            return null;
+        }
+        function screenToCompass(v) {            // اتجاه الشاشة -> اتجاه البوصلة (عكس الدوران)
+            const rot = LEVELS[level].rot;
+            let dx = v[0], dy = v[1];
+            for (let i = 0; i < rot / 90; i++) { const t = dx; dx = dy; dy = -t; }   // دوران عكسي ٩٠° لكل خطوة
+            return Object.keys(DIRS).find(k => DIRS[k].dx === dx && DIRS[k].dy === dy);
+        }
+        window.addEventListener('pointerdown', (e) => {
+            if (phase !== 'PLAY' || (e.target.closest && e.target.closest('button, .edu-overlay'))) return;
+            const k = dpadHit(e.clientX, e.clientY); if (k) tryMove(k, performance.now());
+        });
+        window.addEventListener('keydown', (e) => {
+            if (phase !== 'PLAY') return;
+            const k = { ArrowUp: 'N', ArrowRight: 'E', ArrowDown: 'S', ArrowLeft: 'W', KeyW: 'N', KeyD: 'E', KeyS: 'S', KeyA: 'W' }[e.code];
+            if (!k) return; e.preventDefault(); e.stopPropagation(); tryMove(k, performance.now());
+        }, true);
+
+        /* ---------------- التحديث ---------------- */
+        let holdDir = null, holdT = 0, repeatT = 0, curDir = null;
+        function update(now, dt) {
+            if (flash > 0) flash -= dt; if (bump > 0) bump -= dt;
+            if (phase === 'INTRO') { if (now >= phaseUntil) { phase = 'PLAY'; msg = ''; } return; }
+            if (phase === 'WIN') { if (now >= phaseUntil) { if (mi >= MAPS) endLevel(); else newMap(now); } return; }
+            if (phase !== 'PLAY') return;
+            if (anim && now - anim.t0 > 280) { anim = null; reachCheck(now); }
+            const d = bodyDir(now); curDir = d;
+            if (d && d === holdDir) {
+                holdT += dt;
+                if (holdT >= 0.5) { if (repeatT <= 0 || holdT - repeatT >= 0.6) { repeatT = holdT; tryMove(d, now); } }
+            } else { holdDir = d; holdT = 0; repeatT = 0; }
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function drawBoard(now) {
+            const n = map.size, cs = cellPx();
+            // البحر
+            ctx.fillStyle = '#0a5a7a'; ctx.fillRect(board.x - 16, board.y - 16, board.s + 32, board.s + 32);
+            for (let i = 0; i < 6; i++) { ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(board.x + board.s / 2, board.y + board.s / 2, board.s * 0.62 + i * 10 + Math.sin(now / 600 + i) * 3, 0, 7); ctx.stroke(); }
+            for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+                const c = toScreenCell(x, y);
+                ctx.fillStyle = (x + y) % 2 ? '#e8d28a' : '#f1dc9b'; ctx.fillRect(board.x + c.x * cs, board.y + c.y * cs, cs, cs);
+            }
+            ctx.strokeStyle = 'rgba(120,90,30,0.35)'; ctx.lineWidth = 1;
+            for (let i = 0; i <= n; i++) { ctx.beginPath(); ctx.moveTo(board.x + i * cs, board.y); ctx.lineTo(board.x + i * cs, board.y + board.s); ctx.moveTo(board.x, board.y + i * cs); ctx.lineTo(board.x + board.s, board.y + i * cs); ctx.stroke(); }
+            const fs = cs * 0.62; ctx.font = `${fs}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            const at = (x, y) => { const c = toScreenCell(x, y); return { x: board.x + (c.x + 0.5) * cs, y: board.y + (c.y + 0.55) * cs }; };
+            trail.forEach(t => { const p = at(t.x, t.y); ctx.fillStyle = 'rgba(120,70,20,0.45)'; ctx.beginPath(); ctx.arc(p.x, p.y, cs * 0.1, 0, 7); ctx.fill(); });
+            for (const k in map.rocks) { const p = at(k % n, Math.floor(k / n)); ctx.fillText(map.rocks[k], p.x, p.y); }
+            const sp = at(map.start.x, map.start.y); ctx.fillText('🚩', sp.x, sp.y);
+            if (map.wp && !map.wpDone) { const p = at(map.wp.x, map.wp.y); ctx.fillText('🗼', p.x, p.y + Math.sin(now / 250) * 2); }
+            const gp = at(map.goal.x, map.goal.y); ctx.fillText(phase === 'WIN' ? '💎' : '❌', gp.x, gp.y);
+            // اللاعب
+            let px = pos.x, py = pos.y;
+            if (anim) { const t = Math.min(1, (now - anim.t0) / 280); px = anim.from.x + (anim.to.x - anim.from.x) * t; py = anim.from.y + (anim.to.y - anim.from.y) * t; }
+            const pp = at(px, py);
+            ctx.font = `${cs * 0.72}px Arial`; ctx.fillText('🧑‍✈️', pp.x + (bump > 0 ? Math.sin(now / 30) * 4 : 0), pp.y - Math.abs(Math.sin(now / 150)) * (anim ? 5 : 0));
+        }
+        function drawCompass(now) {
+            const cx = portrait ? w - 50 : w - 120, cy = portrait ? 150 : 190, r = portrait ? 34 : 54;
+            ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.arc(cx, cy, r + 10, 0, 7); ctx.fill();
+            ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+            const nS = northOnScreen(), v = { dx: screenVec('N')[0], dy: screenVec('N')[1] };
+            const lab = { N: 'ش', E: 'شر', S: 'ج', W: 'غ' };
+            for (const k in DIRS) {
+                const sd = screenVec(k);
+                EDU.text(ctx, lab[k], cx + sd[0] * (r - 14), cy + sd[1] * (r - 14), Math.max(11, r * 0.28), k === 'N' ? '#ef4444' : '#fde68a');
+            }
+            ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.moveTo(cx + v.dx * (r - 24), cy + v.dy * (r - 24)); ctx.lineTo(cx - v.dy * 7, cy + v.dx * 7); ctx.lineTo(cx + v.dy * 7, cy - v.dx * 7); ctx.closePath(); ctx.fill();
+            if (LEVELS[level].rot) EDU.text(ctx, 'الخريطة مدارة!', cx, cy + r + 24, 13, '#fca5a5');
+        }
+        function drawDpad() {
+            const { s, cx, cy } = dpad();
+            const scr = [['▲', 0, -1], ['▶', 1, 0], ['▼', 0, 1], ['◀', -1, 0]];
+            scr.forEach(([t, dx, dy]) => {
+                const bx = cx + dx * s * 1.15, by = cy + dy * s * 1.15, k = screenToCompass([dx, dy]), on = curDir === k;
+                ctx.fillStyle = on ? '#fbbf24' : 'rgba(255,255,255,0.14)'; ctx.beginPath(); ctx.roundRect(bx - s / 2, by - s / 2, s, s, 12); ctx.fill();
+                EDU.text(ctx, DIRS[k].k, bx, by, s * 0.28, on ? '#2b1a00' : '#fff');
+            });
+        }
+        function draw(now, dt) {
+            GC.begin(ctx);
+            const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#0a4a62'); g.addColorStop(1, '#04202c'); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+            if (phase === 'MENU' || !map) { return; }
+            layout();
+            if (cameraOK) { const vr = EDU.fitRect(video, { x: w - 160, y: h - 130, w: 150, h: 112 }); ctx.save(); ctx.beginPath(); ctx.roundRect(vr.x, vr.y, vr.w, vr.h, 10); ctx.clip(); EDU.drawVideo(ctx, video, vr, 0.8); if (body.lm && now - body.last < 600) { const full = { x: vr.x, y: vr.y, w: vr.w, h: vr.h }; EDU.drawSkeleton(ctx, body.lm, full, '#fbbf24', 3); } ctx.restore(); }
+            drawBoard(now); drawCompass(now); drawDpad();
+            const L = LEVELS[level], fs = Math.max(14, Math.min(w * 0.04, 20));
+            ctx.fillStyle = 'rgba(4,20,30,0.88)'; ctx.fillRect(0, 0, w, 100);
+            ctx.textBaseline = 'middle'; ctx.font = `700 ${fs}px Tahoma`;
+            ctx.textAlign = 'right'; ctx.fillStyle = '#fcd34d'; ctx.fillText(`المستوى ${level + 1}: ${L.name}`, w - 12, 20);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#e2e8f0'; ctx.fillText(`الخريطة ${Math.min(mi + (phase === 'WIN' ? 0 : 1), MAPS)} / ${MAPS}`, w / 2, 20);
+            ctx.textAlign = 'left'; ctx.fillStyle = '#7dd3fc'; ctx.fillText(`👣 ${EDU.toAr(steps)}`, 118, 20);
+            const txt = map.text, size = Math.max(13, Math.min(w * (txt.length > 50 ? 0.034 : 0.045), 24));
+            EDU.text(ctx, '📜 ' + (txt.length > 70 ? txt.slice(0, 70) + '…' : txt), w / 2, 62, size, '#fef3c7');
+            if (txt.length > 70) EDU.text(ctx, txt.slice(70), w / 2, 84, size, '#fef3c7');
+            if (phase === 'INTRO') { ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, h * 0.42, w, 90); EDU.text(ctx, L.lesson, w / 2, h * 0.42 + 30, Math.max(15, Math.min(w * 0.045, 24)), '#fde047'); EDU.text(ctx, cameraOK ? '☝️ شمال  |  → شرق (يمينك)  |  ← غرب (يسارك)  |  ✖ جنوب (اعقد ذراعيك)' : 'اضغط الأزرار أو الأسهم', w / 2, h * 0.42 + 64, Math.max(12, Math.min(w * 0.032, 17)), '#e2e8f0'); }
+            if (msg && (phase === 'PLAY' || phase === 'WIN')) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, h * 0.5 - 24, w, 48); EDU.text(ctx, msg, w / 2, h * 0.5, Math.max(15, Math.min(w * 0.045, 24)), phase === 'WIN' ? '#4ade80' : '#fde047'); }
+            if (holdDir && phase === 'PLAY') EDU.text(ctx, `${DIRS[holdDir].k} ${'▮'.repeat(Math.min(6, Math.floor(holdT * 10)))}`, w / 2, h - 14, 16, '#fbbf24');
+            if (flash > 0) { ctx.fillStyle = `rgba(248,113,113,${Math.min(0.2, flash)})`; ctx.fillRect(0, 0, w, h); }
+            EDU.fx.draw(ctx, dt);
+        }
+        function loop(now) { const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now; update(now, dt); draw(now, dt); requestAnimationFrame(loop); }
+
+        const HELP = 'ابحث عن الكنز! أعطِ الأوامر <b>بجسمك</b>: ذراع للأعلى = شمال، ذراعك اليمنى جانباً = شرق، اليسرى جانباً = غرب، اعقد ذراعيك على الصدر = جنوب. ثبّت الإشارة لتتحرك، واستمر لعدة خطوات. أو استخدم الأزرار والأسهم.';
+        (async function init() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { menu.ready(HELP); return; }
+            try { await EDU.startPose(video, onPose); cameraOK = true; menu.ready(HELP); }
+            catch (e) { console.error(e); menu.ready(HELP + '<br>تعذر تشغيل الكاميرا — استخدم الأزرار.'); }
+        })();
+        requestAnimationFrame(loop);
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

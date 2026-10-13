@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>صائد الألوان</title>
+    <script src="game-common.js"></script>
+    <script src="edu-common.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0b0b14; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = EDU.makeVideo();
+        let w = 0, h = 0;
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; });
+
+        /* ---------------- الألوان وتصنيف البكسلات ---------------- */
+        const COL = {
+            red:    { n: 'الأحمر',   hex: '#ef4444' }, orange: { n: 'البرتقالي', hex: '#f97316' }, yellow: { n: 'الأصفر', hex: '#facc15' },
+            green:  { n: 'الأخضر',   hex: '#22c55e' }, blue:   { n: 'الأزرق',    hex: '#3b82f6' }, purple: { n: 'البنفسجي', hex: '#a855f7' },
+            pink:   { n: 'الوردي',   hex: '#f472b6' }, brown:  { n: 'البني',     hex: '#92400e' }, white:  { n: 'الأبيض',  hex: '#f8fafc' },
+            black:  { n: 'الأسود',   hex: '#171717' }
+        };
+        const IDS = Object.keys(COL);
+
+        function classify(r, g, b) {
+            const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+            const v = mx / 255, s = mx === 0 ? 0 : d / mx;
+            let hh = 0;
+            if (d > 0) {
+                if (mx === r) hh = ((g - b) / d) % 6; else if (mx === g) hh = (b - r) / d + 2; else hh = (r - g) / d + 4;
+                hh = (hh * 60 + 360) % 360;
+            }
+            if (v < 0.2) return 'black';
+            if (s < 0.14 && v > 0.72) return 'white';
+            if (s < 0.2) return null;                                  // رمادي: لا يُحسب
+            if (hh < 14 || hh >= 345) { if (s < 0.5 && v > 0.62) return 'pink'; return v < 0.5 && s > 0.4 ? 'brown' : 'red'; }
+            if (hh < 40) { if (v < 0.58) return 'brown'; if (s < 0.5) return null; return 'orange'; }   // الدرجات الفاتحة (جلد/بيج) لا تُحسب
+            if (hh < 72) return v < 0.4 ? 'brown' : 'yellow';
+            if (hh < 170) return 'green';
+            if (hh < 190) return null;                                  // سماوي
+            if (hh < 262) return 'blue';
+            if (hh < 300) return 'purple';
+            if (hh < 345) return s > 0.25 ? (v > 0.55 ? 'pink' : 'purple') : null;
+            return null;
+        }
+        const SZ = 40, samp = document.createElement('canvas'); samp.width = SZ; samp.height = SZ;
+        const sctx = samp.getContext('2d', { willReadFrequently: true });
+        function analyze(data) {                                         // data: ImageData للمربع المركزي
+            const cnt = {}; IDS.forEach(i => cnt[i] = 0);
+            const px = data.data, n = px.length / 4;
+            for (let i = 0; i < px.length; i += 4) { const c = classify(px[i], px[i + 1], px[i + 2]); if (c) cnt[c]++; }
+            const fr = {}; let best = null, bf = 0;
+            IDS.forEach(i => { fr[i] = cnt[i] / n; if (fr[i] > bf) { bf = fr[i]; best = i; } });
+            return { fr, best, bf };
+        }
+        let seen = { fr: {}, best: null, bf: 0 }, lastSample = 0;
+        function sample(now) {
+            if (now - lastSample < 110 || !video.videoWidth) return;
+            lastSample = now;
+            const side = Math.min(video.videoWidth, video.videoHeight) * 0.42;
+            sctx.drawImage(video, (video.videoWidth - side) / 2, (video.videoHeight - side) / 2, side, side, 0, 0, SZ, SZ);
+            seen = analyze(sctx.getImageData(0, 0, SZ, SZ));
+        }
+
+        /* ---------------- المستويات العشرة ---------------- */
+        const Q_COUNT = 6, MAX_MISSES = 2, NEED = 0.4, HOLD = 1.0;
+        const LEVELS = [
+            { name: 'الألوان الأساسية', sub: 'أحمر أزرق أصفر', limit: 50, kind: 'name', set: ['red', 'blue', 'yellow'] },
+            { name: 'ألوان أكثر', sub: 'أخضر أبيض أسود', limit: 50, kind: 'name', set: ['red', 'blue', 'yellow', 'green', 'white', 'black'] },
+            { name: 'كل الألوان', sub: 'وردي بني بنفسجي', limit: 50, kind: 'name', set: IDS },
+            { name: 'ألغاز الألوان', sub: 'لون الموز؟', limit: 50, kind: 'riddle' },
+            { name: 'خلط الألوان', sub: 'أحمر + أصفر', limit: 50, kind: 'mix' },
+            { name: 'ألغاز وخلط', sub: 'مزيج', limit: 45, kind: 'mixed' },
+            { name: 'سباق الألوان', sub: '٣٠ ثانية', limit: 30, kind: 'mixed' },
+            { name: 'أسرع', sub: '٢٢ ثانية', limit: 22, kind: 'mixed' },
+            { name: 'الخبير', sub: '١٦ ثانية', limit: 16, kind: 'mixed' },
+            { name: 'البرق', sub: '١٢ ثانية', limit: 12, kind: 'mixed' }
+        ];
+        const RIDDLES = [['لون الموز', 'yellow'], ['لون العشب', 'green'], ['لون الطماطم', 'red'], ['لون البرتقال', 'orange'], ['لون السماء الصافية', 'blue'], ['لون الحليب', 'white'],
+            ['لون الفحم', 'black'], ['لون الشوكولاتة', 'brown'], ['لون الباذنجان', 'purple'], ['لون الفراولة', 'red'], ['لون الليمون', 'yellow'], ['لون الجزر', 'orange'],
+            ['لون ورق الشجر', 'green'], ['لون الثلج', 'white'], ['لون البحر', 'blue'], ['لون الليل', 'black'], ['لون حلوى غزل البنات', 'pink'], ['لون الجذع الخشبي', 'brown']];
+        const MIX = [['الأحمر + الأصفر', 'orange'], ['الأزرق + الأصفر', 'green'], ['الأحمر + الأزرق', 'purple'], ['الأحمر + الأبيض', 'pink'], ['الأصفر + الأحمر', 'orange'], ['الأزرق + الأحمر', 'purple']];
+
+        function genQ(L) {
+            const kind = L.kind === 'mixed' ? EDU.pick(['name', 'riddle', 'mix', 'riddle']) : L.kind;
+            if (kind === 'name') { const id = EDU.pick(L.set || IDS); return { text: `أرِني شيئاً لونه ${COL[id].n.replace('ال', '')}`, ans: id, hint: true }; }
+            if (kind === 'riddle') { const [t, id] = EDU.pick(RIDDLES); return { text: `${t}؟ أحضر شيئاً بهذا اللون`, ans: id }; }
+            const [t, id] = EDU.pick(MIX); return { text: `ماذا ينتج عن خلط ${t}؟ أرِني اللون الناتج`, ans: id };
+        }
+
+        let level = 0, qi = 0, misses = 0, correct = 0, phase = 'MENU', q = null;
+        let qStart = 0, hold = 0, phaseUntil = 0, msg = '', flash = 0, flashC = '', lastT = performance.now(), cameraOK = false;
+
+        const menu = EDU.init({
+            id: 'ch', title: 'صائد الألوان', emoji: '🎨', color: '#f472b6', bg1: '#4a1a46', bg2: '#0d0612',
+            levels: LEVELS, onStart: startLevel
+        });
+        function startLevel(i) { level = i; qi = 0; misses = 0; correct = 0; EDU.fx.list = []; nextQ(performance.now()); }
+        function nextQ(now) {
+            if (qi >= Q_COUNT) return endLevel();
+            let nq = genQ(LEVELS[level]), tries = 0;
+            while (q && nq.text === q.text && tries++ < 5) nq = genQ(LEVELS[level]);
+            q = nq; phase = 'Q'; qStart = now; hold = 0;
+        }
+        function endLevel() {
+            phase = 'MENU';
+            const stars = misses > MAX_MISSES ? 0 : misses === 0 ? 3 : misses === 1 ? 2 : 1;
+            menu.finish(stars, `الألوان التي اصطدتها: ${correct} من ${Q_COUNT}`, level);
+        }
+
+        /* ---------------- التحديث ---------------- */
+        let skipBtn = { x: 0, y: 0, w: 0, h: 0 };
+        window.addEventListener('pointerdown', (e) => {
+            if (phase !== 'Q' || (e.target.closest && e.target.closest('button, .edu-overlay'))) return;
+            if (e.clientX >= skipBtn.x && e.clientX <= skipBtn.x + skipBtn.w && e.clientY >= skipBtn.y && e.clientY <= skipBtn.y + skipBtn.h) giveUp(performance.now(), 'تخطّيت: ');
+        });
+        function giveUp(now, pre) { misses++; qi++; phase = 'RES'; phaseUntil = now + 2000; msg = `${pre}اللون المطلوب: ${COL[q.ans].n}`; flash = 0.3; flashC = '248,113,113'; hold = 0; GC.beep(160, 0.3, 'sawtooth', 0.16, 0, 80); }
+        function update(now, dt) {
+            if (flash > 0) flash -= dt;
+            if (phase === 'RES') { if (now >= phaseUntil) { if (misses > MAX_MISSES) endLevel(); else nextQ(now); } return; }
+            if (phase !== 'Q') return;
+            sample(now);
+            const f = seen.fr[q.ans] || 0;
+            if (f >= NEED) hold += dt; else hold = Math.max(0, hold - dt * 1.5);
+            if (hold >= HOLD) {
+                correct++; qi++; phase = 'RES'; phaseUntil = now + 1500; msg = `رائع! هذا هو اللون ${COL[q.ans].n} ✔`; flash = 0.3; flashC = '74,222,128'; hold = 0;
+                EDU.fx.burst(w / 2, h / 2, [COL[q.ans].hex, '#fde047', '#fff'], 40);
+                [660, 880, 1100].forEach((fq, k) => GC.beep(fq, 0.12, 'triangle', 0.16, k * 0.08));
+            } else if ((now - qStart) / 1000 >= LEVELS[level].limit) giveUp(now, 'انتهى الوقت! ');
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function draw(now, dt) {
+            GC.begin(ctx);
+            ctx.fillStyle = '#0b0b14'; ctx.fillRect(0, 0, w, h);
+            const vr = EDU.fitRect(video, { x: 0, y: 0, w, h });
+            if (cameraOK) EDU.drawVideo(ctx, video, vr, 1);
+            else { ctx.fillStyle = '#1f1530'; ctx.fillRect(0, 0, w, h); }
+            if (phase === 'MENU' || !q) return;
+            const L = LEVELS[level];
+            const side = Math.min(vr.w, vr.h) * 0.42, rx = vr.x + vr.w / 2 - side / 2, ry = vr.y + vr.h / 2 - side / 2;
+            // تعتيم خارج مربع الفحص
+            ctx.fillStyle = 'rgba(8,6,20,0.62)';
+            ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.rect(rx, ry, side, side); ctx.fill('evenodd');
+            const best = seen.best, f = seen.fr[q.ans] || 0;
+            const col = f >= NEED ? '#4ade80' : (best ? COL[best].hex : '#ffffff');
+            ctx.strokeStyle = col; ctx.lineWidth = 6; ctx.shadowColor = col; ctx.shadowBlur = 18;
+            ctx.beginPath(); ctx.roundRect(rx, ry, side, side, 16); ctx.stroke(); ctx.shadowBlur = 0;
+            if (phase === 'Q' && hold > 0) { ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 10; ctx.beginPath(); ctx.arc(w / 2, ry + side + 36, 22, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, hold / HOLD)); ctx.stroke(); }
+            // ما تراه الكاميرا
+            const fs = Math.max(14, Math.min(w * 0.04, 20));
+            if (best && seen.bf > 0.15) {
+                ctx.fillStyle = COL[best].hex; ctx.beginPath(); ctx.arc(w / 2 - 70, ry - 26, 14, 0, 7); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+                EDU.text(ctx, `أرى: ${COL[best].n} (${Math.round(seen.bf * 100)}%)`, w / 2 + 14, ry - 26, fs, '#fff');
+            } else EDU.text(ctx, 'ضع الشيء داخل المربع', w / 2, ry - 26, fs, '#e2e8f0');
+            // السؤال
+            ctx.fillStyle = 'rgba(10,6,24,0.85)'; ctx.fillRect(0, 0, w, 96);
+            ctx.textBaseline = 'middle'; ctx.font = `700 ${fs}px Tahoma`;
+            ctx.textAlign = 'right'; ctx.fillStyle = '#f9a8d4'; ctx.fillText(`المستوى ${level + 1}: ${L.name}`, w - 12, 20);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#e2e8f0'; ctx.fillText(`${Math.min(qi + (phase === 'Q' ? 1 : 0), Q_COUNT)} / ${Q_COUNT}`, w / 2, 20);
+            ctx.textAlign = 'left'; ctx.fillStyle = '#fca5a5'; ctx.fillText(`✖ ${misses}/${MAX_MISSES + 1}`, 118, 20);
+            EDU.text(ctx, q.text, w / 2, 58, Math.max(17, Math.min(w * 0.05, 28)), '#fde047', '#be185d');
+            if (q.hint) { ctx.fillStyle = COL[q.ans].hex; ctx.beginPath(); ctx.arc(w - 36, 62, 16, 0, 7); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke(); }
+            const left = phase === 'Q' ? Math.max(0, 1 - (now - qStart) / 1000 / L.limit) : 0;
+            ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(12, 88, w - 24, 5);
+            ctx.fillStyle = left < 0.3 ? '#f87171' : '#f472b6'; ctx.fillRect(12, 88, (w - 24) * left, 5);
+            // زر التخطي
+            skipBtn = { x: 12, y: h - 56, w: 96, h: 40 };
+            ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.roundRect(skipBtn.x, skipBtn.y, skipBtn.w, skipBtn.h, 12); ctx.fill();
+            EDU.text(ctx, 'تخطّي ⏭', skipBtn.x + 48, skipBtn.y + 20, 15, '#fff');
+            if (phase === 'RES') { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, h * 0.5 - 30, w, 60); EDU.text(ctx, msg, w / 2, h * 0.5, Math.max(16, Math.min(w * 0.05, 28)), msg.includes('✔') ? '#4ade80' : '#fca5a5'); }
+            if (flash > 0) { ctx.fillStyle = `rgba(${flashC},${Math.min(0.2, flash)})`; ctx.fillRect(0, 0, w, h); }
+            EDU.fx.draw(ctx, dt);
+        }
+
+        function loop(now) { const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now; update(now, dt); draw(now, dt); requestAnimationFrame(loop); }
+
+        const HELP = 'مهمتك: <b>أحضر شيئاً من حولك بلون معيّن</b> وضعه داخل المربع أمام الكاميرا (ورقة، لعبة، ملابس، فاكهة...). ثبّته ثانية واحدة. أضاءة جيدة تساعد الكاميرا!';
+        (async function init() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { menu.ready(HELP + '<br>هذه اللعبة تحتاج كاميرا.'); return; }
+            try { await EDU.startRaw(video); cameraOK = true; menu.ready(HELP); }
+            catch (e) { console.error(e); menu.ready(HELP + '<br>تعذر تشغيل الكاميرا — هذه اللعبة تحتاجها.'); }
+        })();
+        requestAnimationFrame(loop);
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

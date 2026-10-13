@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>حساب بالحركة</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="game-common.js"></script>
+    <script src="edu-common.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #06231a; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = EDU.makeVideo();
+        let w = 0, h = 0;
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; });
+        const body = EDU.makeBody();
+
+        const ACT = { clap: { v: 'صفّق', e: '👏', n: 'تصفيقة' }, jump: { v: 'اقفز', e: '🦘', n: 'قفزة' }, squat: { v: 'اجلس القرفصاء', e: '🏋️', n: 'جلسة' } };
+        const times = (n) => n === 2 ? 'مرتين' : `${EDU.toAr(n)} ${n <= 10 ? 'مرات' : 'مرة'}`;
+
+        /* ---------------- المستويات العشرة ---------------- */
+        const R = EDU.rand, P = EDU.pick;
+        const direct = (act, lo, hi) => () => { const n = R(lo, hi); return { parts: [{ act, n }], expr: null }; };
+        const add = (act, max) => () => { const a = R(1, max - 1), b = R(1, max - a); return { parts: [{ act: act || P(['clap', 'jump']), n: a + b }], expr: `${EDU.toAr(a)} + ${EDU.toAr(b)}` }; };
+        const sub = (act) => () => { const a = R(3, 9), b = R(1, a - 1); return { parts: [{ act: act || P(['clap', 'jump']), n: a - b }], expr: `${EDU.toAr(a)} − ${EDU.toAr(b)}` }; };
+        const mul = () => { const a = P([2, 2, 3]), b = R(1, a === 2 ? 4 : 3); return { parts: [{ act: P(['clap', 'jump']), n: a * b }], expr: `${EDU.toAr(a)} × ${EDU.toAr(b)}` }; };
+        const seq = () => ({ parts: [{ act: 'clap', n: R(1, 3) }, { act: P(['jump', 'squat']), n: R(1, 3) }], expr: null });
+        const seqEq = () => { const a = R(1, 2), b = R(1, 2), c = R(1, 4); return { parts: [{ act: 'clap', n: a + b }, { act: P(['jump', 'squat']), n: c }], expr: `${EDU.toAr(a)} + ${EDU.toAr(b)}  ثم  ${EDU.toAr(c)}`, mixed: true }; };
+        const LEVELS = [
+            { name: 'التصفيق', sub: 'عُدّ بيديك', limit: 25, gen: direct('clap', 1, 5), lesson: 'عُدّ بالتصفيق: صفّق بعدد المطلوب ثم توقف.' },
+            { name: 'القفز', sub: 'عُدّ بجسمك', limit: 25, gen: direct('jump', 1, 5), lesson: 'اقفز بعدد المطلوب.' },
+            { name: 'الجمع بالتصفيق', sub: '٢ + ٣', limit: 25, gen: add('clap', 8), lesson: 'احسب الناتج ثم صفّق بعدده.' },
+            { name: 'الجمع بالقفز', sub: '٤ + ٣', limit: 25, gen: add('jump', 9), lesson: 'احسب الناتج ثم اقفز بعدده.' },
+            { name: 'الطرح', sub: '٧ − ٣', limit: 24, gen: sub(), lesson: 'الطرح: ما يتبقّى هو عدد الحركات.' },
+            { name: 'الضرب', sub: '٢ × ٣', limit: 24, gen: mul, lesson: 'الضرب جمع متكرر: ٢ × ٣ = ٢ + ٢ + ٢.' },
+            { name: 'القرفصاء', sub: 'حركة جديدة', limit: 24, gen: () => P([direct('squat', 1, 4), direct('clap', 1, 5), add('clap', 7)])(), lesson: 'القرفصاء: انزل بجسمك ثم قف.' },
+            { name: 'تسلسل الحركات', sub: 'صفّق ٢ ثم اقفز ٣', limit: 28, gen: seq, lesson: 'نفّذ الحركتين بالترتيب.' },
+            { name: 'معادلة وتسلسل', sub: 'حساب + ترتيب', limit: 28, gen: seqEq, lesson: 'احسب أولاً: التصفيق بعدد المجموع ثم الحركة الثانية.' },
+            { name: 'التحدّي', sub: 'سريع ومتنوع', limit: 18, gen: () => P([add(null, 9), sub(), mul, seq, seqEq])(), lesson: 'كل أنواع الأسئلة وبوقت أقصر!' }
+        ];
+        const Q_COUNT = 6, MAX_MISTAKES = 3, SETTLE = 1.0;
+
+        let level = 0, qi = 0, mistakes = 0, correct = 0, phase = 'MENU', q = null, partIdx = 0, partT0 = 0, settleAt = 0;
+        let t0 = 0, phaseUntil = 0, msg = '', ok = true, flash = 0, flashC = '', lastT = performance.now(), cameraOK = false, manual = [];
+
+        const menu = EDU.init({
+            id: 'mm', title: 'حساب بالحركة', emoji: '🏃', color: '#4ade80', bg1: '#0c4a2e', bg2: '#04140c',
+            levels: LEVELS, onStart: startLevel
+        });
+        function startLevel(i) { level = i; qi = 0; mistakes = 0; correct = 0; EDU.fx.list = []; phase = 'INTRO'; phaseUntil = performance.now() + 3000; q = null; }
+        function nextQ(now) {
+            if (qi >= Q_COUNT) return endLevel();
+            q = LEVELS[level].gen(); partIdx = 0; lastShown = 0; t0 = now; partT0 = now; settleAt = 0; manual = []; body.reset(); phase = 'Q';
+        }
+        function endLevel() {
+            phase = 'MENU';
+            const stars = mistakes >= MAX_MISTAKES ? 0 : mistakes === 0 ? 3 : mistakes === 1 ? 2 : 1;
+            menu.finish(stars, `الإجابات الصحيحة: ${correct} من ${Q_COUNT}`, level);
+        }
+        function result(now, good, text) {
+            ok = good; msg = text; phase = 'RES'; phaseUntil = now + 1500; qi++;
+            if (good) { correct++; flash = 0.3; flashC = '74,222,128'; EDU.fx.burst(w / 2, h * 0.35, ['#4ade80', '#fde047', '#38bdf8'], 40); [660, 880, 1100].forEach((f, k) => GC.beep(f, 0.12, 'triangle', 0.16, k * 0.08)); }
+            else { mistakes++; flash = 0.3; flashC = '248,113,113'; GC.beep(160, 0.3, 'sawtooth', 0.16, 0, 80); GC.vibrate(100); }
+        }
+
+        /* ---------------- عدّ الأحداث ---------------- */
+        function onPose(res) { body.update(res.poseLandmarks || null, performance.now(), video.videoWidth ? video.videoWidth / video.videoHeight : 4 / 3); }
+        function countOf(act, since) {
+            return body.events.filter(e => e.type === act && e.t >= since).length + manual.filter(e => e.type === act && e.t >= since).length;
+        }
+        // بديل بلا كاميرا: مسطرة المسافة أو اللمس تحسب حدثاً للحركة الحالية
+        function manualEvent() { if (phase !== 'Q') return; const now = performance.now(); manual.push({ type: q.parts[partIdx].act, t: now }); GC.beep(500, 0.05, 'triangle', 0.1); }
+        window.addEventListener('keydown', (e) => { if (phase !== 'Q' || e.code !== 'Space') return; e.preventDefault(); e.stopPropagation(); manualEvent(); }, true);
+        window.addEventListener('pointerdown', (e) => { if (phase !== 'Q' || (e.target.closest && e.target.closest('button, .edu-overlay'))) return; if (!cameraOK) manualEvent(); });
+
+        let lastShown = 0;
+        function update(now, dt) {
+            if (flash > 0) flash -= dt;
+            if (phase === 'INTRO') { if (now >= phaseUntil) nextQ(now); return; }
+            if (phase === 'RES') { if (now >= phaseUntil) { if (mistakes >= MAX_MISTAKES) endLevel(); else nextQ(now); } return; }
+            if (phase !== 'Q') return;
+            const part = q.parts[partIdx], since = partT0 + 350, c = countOf(part.act, since);
+            if (c !== lastShown) { if (c > lastShown) { GC.beep(520 + c * 60, 0.07, 'triangle', 0.12); EDU.fx.burst(w / 2, h * 0.72, ['#4ade80', '#fff'], 8); } lastShown = c; }
+            if (c > part.n) { result(now, false, `زدت عن المطلوب! المطلوب ${times(part.n)}`); return; }
+            if (c === part.n) {
+                if (!settleAt) settleAt = now;
+                if (now - settleAt >= SETTLE * 1000) {
+                    if (partIdx + 1 < q.parts.length) { partIdx++; partT0 = now; settleAt = 0; lastShown = 0; GC.beep(784, 0.12, 'square', 0.1); }
+                    else { result(now, true, 'ممتاز! عددت بشكل صحيح ✔'); return; }
+                }
+            } else settleAt = 0;
+            if ((now - t0) / 1000 >= LEVELS[level].limit) { result(now, false, `انتهى الوقت — المطلوب ${q.parts.map(p => ACT[p.act].v + ' ' + times(p.n)).join(' ثم ')}`); }
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function draw(now, dt) {
+            GC.begin(ctx);
+            const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#0a3a28'); g.addColorStop(1, '#03120b'); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+            if (phase === 'MENU' || !LEVELS[level]) return;
+            const L = LEVELS[level], fs = Math.max(13, Math.min(w * 0.038, 19));
+            const area = { x: 8, y: 150, w: w - 16, h: h - 160 };
+            const vr = EDU.fitRect(video, area);
+            ctx.save(); ctx.beginPath(); ctx.roundRect(vr.x, vr.y, vr.w, vr.h, 18); ctx.clip(); ctx.fillStyle = '#000'; ctx.fillRect(vr.x, vr.y, vr.w, vr.h);
+            if (cameraOK) EDU.drawVideo(ctx, video, vr, 0.7);
+            if (body.lm && now - body.last < 500) EDU.drawSkeleton(ctx, body.lm, vr, '#4ade80', 5);
+            else EDU.text(ctx, cameraOK ? 'قف أمام الكاميرا ليظهر جسمك' : 'اضغط الشاشة أو المسطرة لتعدّ الحركات', vr.x + vr.w / 2, vr.y + vr.h / 2, 18, '#fca5a5');
+            ctx.restore();
+            ctx.strokeStyle = 'rgba(74,222,128,0.6)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(vr.x, vr.y, vr.w, vr.h, 18); ctx.stroke();
+            // الشريط العلوي
+            ctx.fillStyle = 'rgba(3,18,11,0.92)'; ctx.fillRect(0, 0, w, 144);
+            ctx.textBaseline = 'middle'; ctx.font = `700 ${fs}px Tahoma`;
+            ctx.textAlign = 'right'; ctx.fillStyle = '#86efac'; ctx.fillText(`المستوى ${level + 1}: ${L.name}`, w - 12, 18);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#e2e8f0'; ctx.fillText(`${Math.min(qi + (phase === 'Q' ? 1 : 0), Q_COUNT)} / ${Q_COUNT}`, w / 2, 18);
+            ctx.textAlign = 'left'; ctx.fillText('❤️'.repeat(MAX_MISTAKES - mistakes) + '🖤'.repeat(mistakes), 118, 18);
+            if (q && (phase === 'Q' || phase === 'RES')) {
+                if (q.expr) { ctx.save(); ctx.direction = 'ltr'; EDU.text(ctx, q.expr + (q.mixed ? '' : ' = ؟'), w / 2, 56, Math.max(28, Math.min(w * 0.08, 48)), '#fde047', '#a16207'); ctx.restore(); }
+                const instr = q.parts.map(p => `${ACT[p.act].e} ${ACT[p.act].v}${q.expr && !q.mixed ? ' بعدد الناتج' : ' ' + (q.expr ? '' : times(p.n))}`.trim()).join('  ثم  ');
+                EDU.text(ctx, instr, w / 2, q.expr ? 96 : 66, Math.max(16, Math.min(w * 0.05, 28)), '#fff');
+                if (phase === 'Q') { const f = Math.max(0, 1 - (now - t0) / 1000 / L.limit); ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(12, 132, w - 24, 5); ctx.fillStyle = f < 0.3 ? '#f87171' : '#4ade80'; ctx.fillRect(12, 132, (w - 24) * f, 5); }
+                // عدّاد الحركات
+                if (phase === 'Q' && !(q.expr && !q.mixed && false)) {
+                    const part = q.parts[partIdx], c = countOf(part.act, partT0 + 350);
+                    const showN = !q.expr || q.mixed ? part.n : null;
+                    EDU.text(ctx, `${ACT[part.act].e} ${EDU.toAr(c)}${showN ? ' / ' + EDU.toAr(showN) : ''}`, w / 2, vr.y + vr.h - 36, Math.max(30, Math.min(w * 0.09, 54)), c > part.n ? '#f87171' : '#4ade80', '#000');
+                    if (q.parts.length > 1) q.parts.forEach((p, i) => EDU.text(ctx, ACT[p.act].e + EDU.toAr(p.n), w / 2 + (i - 0.5) * 70, vr.y + 24, 20, i === partIdx ? '#fde047' : (i < partIdx ? '#4ade80' : '#94a3b8')));
+                    if (settleAt) { ctx.fillStyle = '#4ade80'; ctx.fillRect(vr.x, vr.y + vr.h - 8, vr.w * Math.min(1, (now - settleAt) / 1000 / SETTLE), 8); }
+                }
+            }
+            if (phase === 'INTRO') { ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(0, h * 0.4, w, 110); EDU.text(ctx, L.lesson, w / 2, h * 0.4 + 36, Math.max(15, Math.min(w * 0.045, 24)), '#fde047'); EDU.text(ctx, '👏 صفّق  🦘 اقفز  🏋️ اجلس القرفصاء — بعدد الناتج ثم توقف لحظة', w / 2, h * 0.4 + 78, Math.max(12, Math.min(w * 0.032, 17)), '#e2e8f0'); }
+            if (phase === 'RES') { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, h * 0.5 - 30, w, 60); EDU.text(ctx, msg, w / 2, h * 0.5, Math.max(16, Math.min(w * 0.05, 28)), ok ? '#4ade80' : '#fca5a5'); }
+            if (flash > 0) { ctx.fillStyle = `rgba(${flashC},${Math.min(0.2, flash)})`; ctx.fillRect(0, 0, w, h); }
+            EDU.fx.draw(ctx, dt);
+        }
+        function loop(now) { const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now; update(now, dt); draw(now, dt); requestAnimationFrame(loop); }
+
+        const HELP = 'تعلّم الحساب بجسمك! تظهر مسألة، وعليك أن <b>تصفّق أو تقفز أو تجلس القرفصاء بعدد الناتج</b> ثم تتوقف لحظة لتتأكد اللعبة. قف على بعد مترين ليظهر جسمك. بدون كاميرا: اضغط الشاشة أو المسطرة مع كل حركة.';
+        (async function init() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { menu.ready(HELP); return; }
+            try { await EDU.startPose(video, onPose); cameraOK = true; menu.ready(HELP); }
+            catch (e) { console.error(e); menu.ready(HELP + '<br>تعذر تشغيل الكاميرا — استخدم اللمس أو المسطرة.'); }
+        })();
+        requestAnimationFrame(loop);
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

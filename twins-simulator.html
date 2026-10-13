@@ -2,394 +2,725 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>التوأم الرقمي - قلّد حركاتي</title>
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>التوأم الرقمي - استوديو الحركة</title>
+
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
-    
+    <script src="game-common.js"></script>
+
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background-color: #0b0c10; /* خلفية داكنة جداً */
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+            background: #070b14; color: #fff;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            touch-action: none;
+            touch-action: none; -webkit-user-select: none; user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
 
-        #gameCanvas {
-            display: block;
-            width: 100vw;
-            height: 100vh;
+        /* الكاميرا المصغرة */
+        #cam {
+            position: fixed; z-index: 10; width: 104px; height: 78px; border-radius: 10px; overflow: hidden;
+            border: 2px solid rgba(102, 252, 241, 0.7); box-shadow: 0 0 14px rgba(102, 252, 241, 0.35);
+            left: calc(10px + env(safe-area-inset-left)); top: calc(62px + env(safe-area-inset-top)); background: #000;
         }
+        #video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0.8; }
 
-        /* نافذة الكاميرا المصغرة لمعرفة مكان اللاعب */
-        #cameraContainer {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            width: 160px;
-            height: 120px;
-            border: 3px solid #66fcf1;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 0 15px rgba(102, 252, 241, 0.5);
-            background: #000;
-            z-index: 10;
+        /* الشريط العلوي */
+        #topbar {
+            position: fixed; z-index: 12; top: 0; left: 0; right: 0; height: calc(52px + env(safe-area-inset-top));
+            padding: env(safe-area-inset-top) calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left));
+            display: flex; align-items: center; gap: 10px;
+            background: linear-gradient(180deg, rgba(7, 11, 20, 0.9), rgba(7, 11, 20, 0));
         }
+        #modeTitle { font-weight: 800; font-size: 1.05rem; color: #66fcf1; flex: 1; text-align: right; }
+        #scoreBox { font-weight: 800; font-size: 1.05rem; color: #fde047; min-width: 80px; text-align: left; }
 
-        #videoElement {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1); /* عكس الكاميرا كالمرآة */
-            opacity: 0.7; /* جعلها شفافة قليلاً لعدم التشتيت */
+        /* شريط الأدوات السفلي */
+        #toolbar {
+            position: fixed; z-index: 12; bottom: 0; left: 0; right: 0;
+            padding: 8px calc(100px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
+            display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: nowrap; overflow-x: auto;
+            background: linear-gradient(0deg, rgba(7, 11, 20, 0.92), rgba(7, 11, 20, 0));
+            scrollbar-width: none;
         }
+        #toolbar::-webkit-scrollbar { display: none; }
+        .grp { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-radius: 14px; background: rgba(255,255,255,0.07); flex: 0 0 auto; }
+        .grp label { font-size: 0.72rem; color: #9fb4c8; margin-inline-end: 2px; }
 
-        /* شاشات واجهة المستخدم */
+        button { font-family: inherit; color: #fff; cursor: pointer; border: none; }
+        .tb {
+            min-width: 40px; height: 38px; padding: 0 12px; border-radius: 12px; background: rgba(255,255,255,0.1);
+            font-size: 0.95rem; font-weight: 700; border: 1px solid transparent; white-space: nowrap;
+        }
+        .tb.on { background: #66fcf1; color: #04201b; }
+        .tb:active { transform: scale(0.95); }
+        .dot { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.4); padding: 0; min-width: 0; }
+        .dot.on { border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,0.35); }
+
+        /* الشاشات */
         .overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            background: rgba(11, 12, 16, 0.9);
-            color: white;
-            z-index: 20;
-            text-align: center;
-            padding: 20px;
-            box-sizing: border-box;
+            position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center;
+            justify-content: center; text-align: center; padding: 16px; overflow-y: auto;
+            background: radial-gradient(circle at 50% 0%, rgba(30, 64, 90, 0.9), rgba(7, 11, 20, 0.97) 70%);
         }
-
-        h1 {
-            font-size: 3.5rem;
-            margin-bottom: 15px;
-            color: #66fcf1;
-            text-shadow: 0 0 10px rgba(102, 252, 241, 0.7);
+        .overlay > * { flex-shrink: 0; }
+        h1 { margin: 0 0 6px; font-size: clamp(1.8rem, 7vw, 3rem); color: #66fcf1; text-shadow: 0 0 16px rgba(102, 252, 241, 0.5); }
+        p { margin: 0 0 16px; max-width: 560px; line-height: 1.7; color: #b8c7d6; font-size: clamp(0.92rem, 3.4vw, 1.1rem); }
+        #modes { display: grid; grid-template-columns: repeat(2, minmax(140px, 220px)); gap: 12px; margin: 0 0 14px; width: min(94vw, 470px); }
+        .mode {
+            padding: 14px 10px; border-radius: 18px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14);
+            font-size: 1rem; font-weight: 800; line-height: 1.5;
         }
-
-        p {
-            font-size: 1.5rem;
-            margin-bottom: 30px;
-            color: #c5c6c7;
-            max-width: 80%;
-            line-height: 1.6;
-        }
-
-        button {
-            padding: 15px 50px;
-            font-size: 1.8rem;
-            background-color: #45a29e;
-            color: #fff;
-            border: 2px solid #66fcf1;
-            border-radius: 50px;
-            cursor: pointer;
-            box-shadow: 0 0 15px rgba(102, 252, 241, 0.4);
-            transition: all 0.3s ease;
-        }
-
-        button:hover {
-            background-color: #66fcf1;
-            color: #0b0c10;
-            box-shadow: 0 0 25px rgba(102, 252, 241, 0.8);
-        }
-
-        button:active {
-            transform: scale(0.95);
-        }
-
+        .mode span { display: block; font-size: 2rem; }
+        .mode small { display: block; font-weight: 400; font-size: 0.78rem; color: #9fb4c8; }
+        .mode:hover, .mode:active { background: rgba(102, 252, 241, 0.18); border-color: #66fcf1; }
+        .mode:disabled { opacity: 0.4; }
         .hidden { display: none !important; }
-
-        .loader {
-            border: 5px solid rgba(255,255,255,0.1);
-            border-top: 5px solid #66fcf1;
-            border-radius: 50%;
-            width: 70px;
-            height: 70px;
-            animation: spin 1s linear infinite;
-            margin-bottom: 25px;
+        .loader { border: 5px solid rgba(255,255,255,0.1); border-top-color: #66fcf1; border-radius: 50%; width: 56px; height: 56px; animation: spin 1s linear infinite; margin-bottom: 16px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #warn {
+            position: fixed; z-index: 15; top: calc(60px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+            background: rgba(220, 38, 38, 0.85); padding: 8px 18px; border-radius: 20px; font-weight: 700; display: none; white-space: nowrap;
         }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* رسالة التحذير عند خروج اللاعب من الكاميرا */
-        #warningMsg {
-            position: absolute;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(255, 0, 0, 0.7);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-size: 1.5rem;
-            font-weight: bold;
-            z-index: 15;
-            display: none;
-        }
+        @media (max-height: 520px) { h1 { margin-bottom: 2px; } p { margin-bottom: 8px; } .mode { padding: 8px; } .mode span { font-size: 1.5rem; } #cam { width: 80px; height: 60px; } }
     </style>
 </head>
 <body>
+    <canvas id="canvas"></canvas>
+    <div id="cam"><video id="video" autoplay playsinline muted></video></div>
+    <div id="warn">قف أمام الكاميرا ليظهر جسمك بالكامل</div>
 
-    <div id="uiOverlay" class="overlay">
+    <div id="topbar" class="hidden">
+        <button id="menuBtn" class="tb">☰ القائمة</button>
+        <div id="modeTitle"></div>
+        <div id="scoreBox"></div>
+    </div>
+    <div id="toolbar" class="hidden"></div>
+
+    <div id="overlay" class="overlay">
         <div id="loader" class="loader"></div>
-        <h1 id="uiTitle">تجهيز الذكاء الاصطناعي...</h1>
-        <p id="uiDesc">ننتظر موافقتك لتشغيل الكاميرا الأمامية.</p>
-        <button id="startBtn" class="hidden">العب الآن</button>
+        <h1 id="title">التوأم الرقمي</h1>
+        <p id="desc">جاري تشغيل الكاميرا وتحميل الذكاء الاصطناعي...</p>
+        <div id="modes" class="hidden">
+            <button class="mode" data-mode="free"><span>🪞</span>المرآة الحرّة<small>توأمك يقلّدك، مع أشكال وأثر حركة</small></button>
+            <button class="mode" data-mode="pose"><span>🎯</span>تحدي الأوضاع<small>قلّد الوضع المعروض بسرعة</small></button>
+            <button class="mode" data-mode="pop"><span>💥</span>فرقعة الطاقة<small>المس الكرات بجسمك لفرقعتها</small></button>
+            <button class="mode" data-mode="clone"><span>👯</span>الاستنساخ<small>سجّل حركتك وارقص مع نسخك</small></button>
+        </div>
     </div>
-
-    <div id="warningMsg">يرجى الوقوف أمام الكاميرا بالكامل!</div>
-
-    <!-- نافذة الكاميرا -->
-    <div id="cameraContainer">
-        <video id="videoElement" autoplay playsinline></video>
-    </div>
-    
-    <!-- اللوحة التي سيُرسم عليها الشخصية الرقمية -->
-    <canvas id="gameCanvas"></canvas>
 
     <script>
-        const canvas = document.getElementById('gameCanvas');
+        const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
-        const videoElement = document.getElementById('videoElement');
-        const uiOverlay = document.getElementById('uiOverlay');
-        const uiTitle = document.getElementById('uiTitle');
-        const uiDesc = document.getElementById('uiDesc');
+        const video = document.getElementById('video');
+        const overlay = document.getElementById('overlay');
+        const titleEl = document.getElementById('title');
+        const descEl = document.getElementById('desc');
         const loader = document.getElementById('loader');
-        const startBtn = document.getElementById('startBtn');
-        const warningMsg = document.getElementById('warningMsg');
+        const modesEl = document.getElementById('modes');
+        const topbar = document.getElementById('topbar');
+        const toolbar = document.getElementById('toolbar');
+        const modeTitle = document.getElementById('modeTitle');
+        const scoreBox = document.getElementById('scoreBox');
+        const warn = document.getElementById('warn');
+        const cam = document.getElementById('cam');
 
-        // إعداد أبعاد الشاشة
-        let width, height;
-        function resize() {
-            width = canvas.width = window.innerWidth;
-            height = canvas.height = window.innerHeight;
-        }
-        window.addEventListener('resize', resize);
-        resize();
+        let w = 0, h = 0, stage = { x: 0, y: 0, w: 0, h: 0 };
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; layout(); });
 
-        let gameState = 'INIT';
-        let latestLandmarks = null;
+        let mode = null;                // free, pose, pop, clone
+        let running = false;
+        let lastSeen = 0, camReady = false;
+        const cfg = { skin: 'neon', color: '#66fcf1', bg: 'grid', trails: false, sparks: true };
+        try { Object.assign(cfg, JSON.parse(localStorage.getItem('twin_cfg') || '{}')); } catch (e) { /* تجاهل */ }
+        const saveCfg = () => { try { localStorage.setItem('twin_cfg', JSON.stringify(cfg)); } catch (e) { /* تجاهل */ } };
 
-        // مصفوفة لتنعيم الحركة (Smooth Interpolation)
-        let smoothedLandmarks = []; 
-        for(let i=0; i<33; i++) {
-            smoothedLandmarks.push({x: 0.5, y: 0.5});
-        }
-
-        function initAI() {
-            const pose = new Pose({
-                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-            });
-
-            pose.setOptions({
-                modelComplexity: 1, // دقة أعلى لضمان تتبع كل أطراف الجسم
-                smoothLandmarks: true,
-                enableSegmentation: false,
-                minDetectionConfidence: 0.6,
-                minTrackingConfidence: 0.6
-            });
-
-            pose.onResults(onPoseResults);
-
-            const camera = new Camera(videoElement, {
-                onFrame: async () => {
-                    if (gameState === 'PLAYING') {
-                        await pose.send({image: videoElement});
-                    }
-                },
-                width: 640,
-                height: 480,
-                facingMode: 'user'
-            });
-
-            camera.start()
-                .then(() => {
-                    uiTitle.innerText = "جاهزون للعب!";
-                    uiDesc.innerHTML = "ابتعد عن الكاميرا حتى يظهر جسمك بالكامل.<br>الشخصية ستقوم بتقليد كل حركاتك!";
-                    loader.classList.add('hidden');
-                    startBtn.classList.remove('hidden');
-                })
-                .catch((err) => {
-                    uiTitle.innerText = "تعذر فتح الكاميرا";
-                    uiTitle.style.color = "#ff5252";
-                    uiDesc.innerHTML = "يرجى التأكد من السماح للمتصفح باستخدام الكاميرا.";
-                    loader.classList.add('hidden');
-                });
+        /* ---------------- التخطيط: المسرح بنسبة الكاميرا الصحيحة ---------------- */
+        function layout() {
+            const topH = 56, botH = toolbar.classList.contains('hidden') ? 8 : 62;
+            const aw = w, ah = h - topH - botH;
+            const asp = (video.videoWidth && video.videoHeight) ? video.videoWidth / video.videoHeight : 4 / 3;
+            let sw = aw, sh = aw / asp;
+            if (sh > ah) { sh = ah; sw = ah * asp; }
+            stage = { x: (w - sw) / 2, y: topH + (ah - sh) / 2, w: sw, h: sh };
         }
 
-        function onPoseResults(results) {
-            if (results.poseLandmarks) {
-                latestLandmarks = results.poseLandmarks;
-                warningMsg.style.display = 'none';
-            } else {
-                // إذا فقدت الكاميرا رؤية اللاعب
-                warningMsg.style.display = 'block';
+        /* ---------------- معالم الجسم والتنعيم ---------------- */
+        const raw = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, v: 0 }));
+        const sm = Array.from({ length: 33 }, () => ({ x: 0.5, y: 0.5, v: 0 }));
+        let hasInit = false;
+
+        function onPose(res) {
+            if (res.poseLandmarks) {
+                res.poseLandmarks.forEach((l, i) => { raw[i].x = l.x; raw[i].y = l.y; raw[i].v = l.visibility === undefined ? 1 : l.visibility; });
+                if (!hasInit) { raw.forEach((r, i) => { sm[i].x = r.x; sm[i].y = r.y; }); hasInit = true; }
+                lastSeen = performance.now();
             }
         }
-
-        startBtn.addEventListener('click', () => {
-            uiOverlay.classList.add('hidden');
-            gameState = 'PLAYING';
-            // بدء حلقة الرسم للعبة
-            requestAnimationFrame(gameLoop);
-        });
-
-        // تشغيل الذكاء الاصطناعي عند فتح الصفحة
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            initAI();
-        } else {
-            uiTitle.innerText = "المتصفح غير مدعوم";
-            loader.classList.add('hidden');
+        function smooth(dt) {
+            for (let i = 0; i < 33; i++) {
+                const r = raw[i], s = sm[i];
+                const d = Math.hypot(r.x - s.x, r.y - s.y);
+                const k = 1 - Math.exp(-dt * (12 + Math.min(d / Math.max(dt, 0.001), 3) * 40));   // تنعيم متكيّف: أسرع عند الحركة السريعة
+                s.x += (r.x - s.x) * k; s.y += (r.y - s.y) * k; s.v = r.v;
+            }
         }
+        // نقطة الشاشة (مرآة): تُعاد كائناً {x,y}
+        const live = (i) => ({ x: stage.x + (1 - sm[i].x) * stage.w, y: stage.y + sm[i].y * stage.h });
+        const hasBody = (now) => now - lastSeen < 800 && sm[11].v > 0.3 && sm[12].v > 0.3;
 
-        function getPoint(index) {
-            let target = latestLandmarks[index];
-            // تنعيم الحركة (Interpolation) لكي لا ترتجف الشخصية
-            smoothedLandmarks[index].x += (target.x - smoothedLandmarks[index].x) * 0.3;
-            smoothedLandmarks[index].y += (target.y - smoothedLandmarks[index].y) * 0.3;
-
-            // تحويل النقاط من (0-1) إلى أبعاد الشاشة
-            // (1 - x) لأننا نعكس الصورة لتكون مرآة!
-            return {
-                x: (1 - smoothedLandmarks[index].x) * width,
-                y: smoothedLandmarks[index].y * height
-            };
-        }
-
-        function drawLine(p1, p2, color = '#66fcf1', lineWidth = 12) {
-            ctx.beginPath();
-            ctx.moveTo(p1.x, p1.y);
-            ctx.lineTo(p2.x, p2.y);
-            ctx.strokeStyle = color;
-            ctx.lineWidth = lineWidth;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.shadowColor = color;
-            ctx.shadowBlur = 15; // تأثير الإضاءة (Neon Effect)
-            ctx.stroke();
-            ctx.shadowBlur = 0; // إعادة التعيين
-        }
-
-        function drawCircle(p, radius, color = '#ffffff') {
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-            ctx.fillStyle = color;
-            ctx.shadowColor = color;
-            ctx.shadowBlur = 20;
-            ctx.fill();
+        /* ---------------- رسم التوأم بعدة أشكال ---------------- */
+        function limb(a, b, wd, skin, c) {
+            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            if (skin === 'neon') {
+                ctx.strokeStyle = c; ctx.lineWidth = wd; ctx.shadowColor = c; ctx.shadowBlur = 16;
+            } else if (skin === 'robot') {
+                ctx.lineCap = 'butt';
+                ctx.strokeStyle = '#1f2937'; ctx.lineWidth = wd + 6; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+                ctx.strokeStyle = c; ctx.lineWidth = wd;
+            } else if (skin === 'cartoon') {
+                ctx.strokeStyle = '#111827'; ctx.lineWidth = wd + 6; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+                ctx.strokeStyle = c; ctx.lineWidth = wd;
+            } else { // stars
+                ctx.strokeStyle = c; ctx.globalAlpha *= 0.55; ctx.lineWidth = Math.max(2, wd * 0.18);
+            }
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
             ctx.shadowBlur = 0;
+            if (skin === 'stars') ctx.globalAlpha /= 0.55;
         }
 
-        function drawBackground() {
-            ctx.fillStyle = '#0b0c10';
-            ctx.fillRect(0, 0, width, height);
-
-            // رسم شبكة (Grid) في الخلفية لتعطي طابع الخيال العلمي
-            ctx.strokeStyle = 'rgba(102, 252, 241, 0.05)';
-            ctx.lineWidth = 1;
-            
-            for (let i = 0; i < width; i += 50) {
-                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
+        function joint(p, r, skin, c, now) {
+            if (skin === 'stars') {
+                const tw = 0.6 + 0.4 * Math.sin(now / 200 + p.x * 0.05);
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.shadowColor = c; ctx.shadowBlur = 10;
+                const s = r * (1.2 + tw * 0.8);
+                ctx.beginPath(); ctx.moveTo(p.x - s, p.y); ctx.lineTo(p.x + s, p.y); ctx.moveTo(p.x, p.y - s); ctx.lineTo(p.x, p.y + s); ctx.stroke();
+                ctx.shadowBlur = 0; return;
             }
-            for (let i = 0; i < height; i += 50) {
-                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke();
+            ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7);
+            ctx.fillStyle = skin === 'robot' ? '#9ca3af' : '#fff';
+            if (skin === 'neon') { ctx.shadowColor = '#fff'; ctx.shadowBlur = 14; }
+            ctx.fill(); ctx.shadowBlur = 0;
+            if (skin === 'robot') { ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.4, 0, 7); ctx.fillStyle = '#374151'; ctx.fill(); }
+            if (skin === 'cartoon') { ctx.strokeStyle = '#111827'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.stroke(); }
+        }
+
+        // P(i) => {x,y}. ينفّذ الرسم لأي مصدر (الحي أو النسخ أو الهيكل الشبحي)
+        function drawFigure(P, skin, c, alpha, now) {
+            const sh = (Math.hypot(P(11).x - P(12).x, P(11).y - P(12).y)) || 80;
+            const u = Math.max(0.5, sh / 120);        // وحدة قياس حسب حجم الجسم على الشاشة
+            ctx.globalAlpha = alpha;
+            const dark = skin === 'robot' ? '#64748b' : skin === 'cartoon' ? shade(c, -0.25) : shade(c, -0.35);
+
+            // الجذع
+            const s1 = P(12), s2 = P(11), h1 = P(24), h2 = P(23);
+            ctx.beginPath(); ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); ctx.lineTo(h2.x, h2.y); ctx.lineTo(h1.x, h1.y); ctx.closePath();
+            if (skin === 'stars') { ctx.strokeStyle = c; ctx.globalAlpha = alpha * 0.4; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = alpha; }
+            else {
+                const g = ctx.createLinearGradient(0, Math.min(s1.y, s2.y), 0, Math.max(h1.y, h2.y));
+                g.addColorStop(0, c); g.addColorStop(1, dark);
+                ctx.fillStyle = g; ctx.globalAlpha = alpha * (skin === 'neon' ? 0.55 : 1); ctx.fill(); ctx.globalAlpha = alpha;
+                if (skin !== 'neon') { ctx.strokeStyle = skin === 'robot' ? '#1f2937' : '#111827'; ctx.lineWidth = 4 * u; ctx.stroke(); }
+                else { ctx.strokeStyle = c; ctx.lineWidth = 3 * u; ctx.shadowColor = c; ctx.shadowBlur = 12; ctx.stroke(); ctx.shadowBlur = 0; }
+            }
+            const lw = 17 * u;
+            // الأرجل ثم الأذرع
+            [[24, 26, 28, 30, 32], [23, 25, 27, 29, 31]].forEach(([a, b, d, , f]) => {
+                limb(P(a), P(b), lw, skin, dark); limb(P(b), P(d), lw * 0.9, skin, dark);
+                limb(P(d), P(f), lw * 0.7, skin, dark);
+            });
+            [[12, 14, 16], [11, 13, 15]].forEach(([a, b, d]) => { limb(P(a), P(b), lw * 0.85, skin, c); limb(P(b), P(d), lw * 0.75, skin, c); });
+            // المفاصل
+            [11, 12, 13, 14, 23, 24, 25, 26].forEach(i => joint(P(i), 7 * u, skin, c, now));
+            [27, 28].forEach(i => joint(P(i), 6 * u, skin, c, now));
+            [15, 16].forEach(i => {   // الكفّان
+                const wr = P(i), idx = P(i + 4), pk = P(i + 2);
+                ctx.beginPath(); ctx.moveTo(wr.x, wr.y); ctx.lineTo(idx.x, idx.y); ctx.lineTo(pk.x, pk.y); ctx.closePath();
+                ctx.fillStyle = skin === 'cartoon' ? '#fff' : c; ctx.globalAlpha = alpha * 0.9; ctx.fill(); ctx.globalAlpha = alpha;
+                joint(wr, 9 * u, skin, c, now);
+            });
+            drawHead(P, skin, c, u, now);
+            ctx.globalAlpha = 1;
+        }
+
+        function drawHead(P, skin, c, u, now) {
+            const nose = P(0), e1 = P(7), e2 = P(8);
+            const ed = Math.hypot(e1.x - e2.x, e1.y - e2.y);
+            const sh = Math.hypot(P(11).x - P(12).x, P(11).y - P(12).y);
+            const r = Math.max(ed * 0.62, sh * 0.2, 18);
+            const cx = (e1.x + e2.x) / 2 * 0.5 + nose.x * 0.5, cy = (e1.y + e2.y) / 2 * 0.5 + nose.y * 0.5 - r * 0.1;
+            const roll = Math.atan2(e2.y - e1.y, e2.x - e1.x) * (e2.x > e1.x ? 1 : -1);
+            ctx.save(); ctx.translate(cx, cy); ctx.rotate(Math.max(-0.6, Math.min(0.6, roll)));
+            const look = Math.max(-r * 0.25, Math.min(r * 0.25, (nose.x - cx) * 0.8));
+            if (skin === 'neon') {
+                ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fillStyle = '#0f172a'; ctx.fill();
+                ctx.strokeStyle = c; ctx.lineWidth = 4 * u; ctx.shadowColor = c; ctx.shadowBlur = 16; ctx.stroke(); ctx.shadowBlur = 0;
+                [-1, 1].forEach(s => { ctx.beginPath(); ctx.arc(s * r * 0.36 + look, -r * 0.08, r * 0.14, 0, 7); ctx.fillStyle = c; ctx.shadowColor = c; ctx.shadowBlur = 12; ctx.fill(); ctx.shadowBlur = 0; });
+            } else if (skin === 'robot') {
+                ctx.fillStyle = '#9ca3af'; ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 4 * u;
+                ctx.beginPath(); ctx.roundRect(-r, -r * 0.9, r * 2, r * 1.8, r * 0.3); ctx.fill(); ctx.stroke();
+                ctx.fillStyle = '#111827'; ctx.beginPath(); ctx.roundRect(-r * 0.8, -r * 0.4, r * 1.6, r * 0.55, r * 0.15); ctx.fill();
+                ctx.fillStyle = c; ctx.shadowColor = c; ctx.shadowBlur = 10;
+                [-1, 1].forEach(s => ctx.fillRect(s * r * 0.38 + look - r * 0.14, -r * 0.3, r * 0.28, r * 0.28));
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = '#1f2937'; ctx.beginPath(); ctx.moveTo(0, -r * 0.9); ctx.lineTo(0, -r * 1.35); ctx.stroke();
+                ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(0, -r * 1.4, r * 0.1, 0, 7); ctx.fill();
+            } else if (skin === 'cartoon') {
+                ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fillStyle = '#fde68a'; ctx.fill(); ctx.strokeStyle = '#111827'; ctx.lineWidth = 4 * u; ctx.stroke();
+                ctx.fillStyle = c; ctx.beginPath(); ctx.arc(0, -r * 0.35, r * 1.0, Math.PI * 1.08, Math.PI * 1.92); ctx.fill(); // شعر/قبعة
+                ctx.fillStyle = '#111827';
+                [-1, 1].forEach(s => { ctx.beginPath(); ctx.arc(s * r * 0.36 + look, -r * 0.02, r * 0.11, 0, 7); ctx.fill(); });
+                ctx.strokeStyle = '#111827'; ctx.lineWidth = 3 * u; ctx.beginPath(); ctx.arc(look * 0.5, r * 0.22, r * 0.34, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+            } else {
+                ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.strokeStyle = c; ctx.globalAlpha *= 0.7; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha /= 0.7;
+                [-1, 1].forEach(s => joint({ x: s * r * 0.36 + look, y: -r * 0.05 }, r * 0.12, 'stars', c, now));
+            }
+            ctx.restore();
+        }
+
+        function shade(hex, amt) {
+            const n = parseInt(hex.slice(1), 16);
+            const f = (v) => Math.max(0, Math.min(255, Math.round(v + 255 * amt)));
+            return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
+        }
+
+        /* ---------------- الخلفيات ---------------- */
+        const starsBg = Array.from({ length: 90 }, () => ({ x: Math.random(), y: Math.random(), s: Math.random() * 1.8 + 0.4, p: Math.random() * 6 }));
+        function drawBackground(now) {
+            if (cfg.bg === 'space') {
+                const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#050816'); g.addColorStop(1, '#1b1040');
+                ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+                starsBg.forEach(s => { ctx.globalAlpha = 0.5 + 0.5 * Math.sin(now / 600 + s.p); ctx.fillStyle = '#fff'; ctx.fillRect(s.x * w, (s.y * h + now * 0.01 * s.s) % h, s.s, s.s); });
+                ctx.globalAlpha = 1;
+            } else if (cfg.bg === 'stage') {
+                ctx.fillStyle = '#0a0a12'; ctx.fillRect(0, 0, w, h);
+                [[0.25, '#f472b6'], [0.5, '#fde047'], [0.75, '#38bdf8']].forEach(([fx, col], i) => {
+                    const sx = w * fx, sw = Math.sin(now / 1500 + i * 2) * w * 0.06;
+                    const g = ctx.createLinearGradient(0, 0, 0, h * 0.9); g.addColorStop(0, col + '55'); g.addColorStop(1, col + '00');
+                    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(sx - 6, 0); ctx.lineTo(sx + 6, 0); ctx.lineTo(sx + sw + w * 0.12, h * 0.9); ctx.lineTo(sx + sw - w * 0.12, h * 0.9); ctx.fill();
+                });
+                const fg = ctx.createRadialGradient(w / 2, h * 0.9, 10, w / 2, h * 0.9, w * 0.5);
+                fg.addColorStop(0, 'rgba(255,255,255,0.18)'); fg.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = fg; ctx.fillRect(0, h * 0.7, w, h * 0.3);
+            } else {
+                ctx.fillStyle = '#070b14'; ctx.fillRect(0, 0, w, h);
+                ctx.strokeStyle = 'rgba(102,252,241,0.06)'; ctx.lineWidth = 1;
+                const gs = Math.max(36, Math.min(w, h) / 14);
+                ctx.beginPath();
+                for (let x = 0; x < w; x += gs) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+                for (let y = 0; y < h; y += gs) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+                ctx.stroke();
             }
         }
 
-        function drawAvatar() {
-            if (!latestLandmarks) return;
-
-            // استخراج أهم مفاصل الجسم من MediaPipe
-            // 0: الأنف، 11/12: الأكتاف، 13/14: الأكواع، 15/16: الرسغ
-            // 23/24: الحوض، 25/26: الركب، 27/28: الكاحل
-
-            const nose = getPoint(0);
-            
-            // الجزء العلوي
-            const leftShoulder = getPoint(12); // معكوسة بسبب المرآة
-            const rightShoulder = getPoint(11);
-            const leftElbow = getPoint(14);
-            const rightElbow = getPoint(13);
-            const leftWrist = getPoint(16);
-            const rightWrist = getPoint(15);
-            
-            // الجزء السفلي
-            const leftHip = getPoint(24);
-            const rightHip = getPoint(23);
-            const leftKnee = getPoint(26);
-            const rightKnee = getPoint(25);
-            const leftAnkle = getPoint(28);
-            const rightAnkle = getPoint(27);
-
-            // 1. رسم الجسم (الجذع)
-            drawLine(leftShoulder, rightShoulder, '#1f2833', 25);
-            drawLine(leftHip, rightHip, '#1f2833', 25);
-            drawLine(leftShoulder, leftHip, '#45a29e', 20);
-            drawLine(rightShoulder, rightHip, '#45a29e', 20);
-
-            // 2. رسم الأذرع
-            drawLine(leftShoulder, leftElbow, '#66fcf1', 15);
-            drawLine(leftElbow, leftWrist, '#66fcf1', 12);
-            
-            drawLine(rightShoulder, rightElbow, '#66fcf1', 15);
-            drawLine(rightElbow, rightWrist, '#66fcf1', 12);
-
-            // 3. رسم الأرجل
-            drawLine(leftHip, leftKnee, '#45a29e', 18);
-            drawLine(leftKnee, leftAnkle, '#45a29e', 15);
-            
-            drawLine(rightHip, rightKnee, '#45a29e', 18);
-            drawLine(rightKnee, rightAnkle, '#45a29e', 15);
-
-            // 4. رسم المفاصل (الدوائر البيضاء)
-            const joints = [
-                leftShoulder, rightShoulder, leftElbow, rightElbow, 
-                leftWrist, rightWrist, leftHip, rightHip, 
-                leftKnee, rightKnee, leftAnkle, rightAnkle
-            ];
-            
-            for (let joint of joints) {
-                drawCircle(joint, 8, '#ffffff');
+        /* ---------------- المؤثرات: أثر وشرر ---------------- */
+        const trailBuf = [];
+        let particles = [];
+        function addSparks(i, now) {
+            const p = live(i), prev = addSparks.prev[i];
+            if (prev) {
+                const sp = Math.hypot(p.x - prev.x, p.y - prev.y);
+                if (sp > 14) for (let k = 0; k < 2; k++) particles.push({ x: p.x, y: p.y, vx: (Math.random() - 0.5) * 3 - (p.x - prev.x) * 0.05, vy: (Math.random() - 0.5) * 3 - (p.y - prev.y) * 0.05, life: 1, c: cfg.color });
             }
-
-            // 5. رسم الرأس (خوذة أليكترونية)
-            // استخدام المسافة بين الأكتاف لتحديد حجم الرأس
-            const headSize = Math.abs(leftShoulder.x - rightShoulder.x) * 0.4;
-            drawCircle(nose, Math.max(30, headSize), '#c5c6c7');
-            
-            // رسم عيون مضيئة للشخصية
-            drawCircle({x: nose.x - 15, y: nose.y - 10}, 6, '#66fcf1');
-            drawCircle({x: nose.x + 15, y: nose.y - 10}, 6, '#66fcf1');
+            addSparks.prev[i] = p;
+        }
+        addSparks.prev = {};
+        function drawParticles(dt) {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx; p.y += p.vy; p.life -= dt * 1.6;
+                if (p.life <= 0) { particles.splice(i, 1); continue; }
+                ctx.globalAlpha = p.life; ctx.fillStyle = p.c; ctx.shadowColor = p.c; ctx.shadowBlur = 8;
+                ctx.beginPath(); ctx.arc(p.x, p.y, 2 + p.life * 3, 0, 7); ctx.fill();
+            }
+            ctx.shadowBlur = 0; ctx.globalAlpha = 1;
         }
 
-        function gameLoop() {
-            if (gameState === 'PLAYING') {
-                ctx.clearRect(0, 0, width, height);
-                
-                // رسم الخلفية
-                drawBackground();
-
-                // رسم التوأم الرقمي
-                drawAvatar();
-                
-                // إضافة نص تعليمات في أعلى الشاشة
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-                ctx.font = '24px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText('اقفز، اركض، وحرك يديك! الشخصية ستقلدك تماماً', width / 2, 40);
+        /* ---------------- وضع الاستنساخ ---------------- */
+        const CLONE_COLORS = ['#f472b6', '#facc15', '#a78bfa'];
+        const FPS_REC = 30, REC_SECONDS = 6;
+        let clones = [];            // { frames: [Float32Array(66)], c }
+        let rec = null;             // { start, frames, lastF }
+        let recCountdown = 0;
+        function startRecording(now) { if (clones.length >= 3 || rec || recCountdown) return; recCountdown = now + 3000; }
+        function updateRecording(now) {
+            if (recCountdown && now >= recCountdown) { recCountdown = 0; rec = { start: now, frames: [], lastF: -1 }; GC.beep(880, 0.2, 'square', 0.12); }
+            if (!rec) return;
+            const f = Math.floor((now - rec.start) / (1000 / FPS_REC));
+            if (f !== rec.lastF) {
+                rec.lastF = f;
+                const a = new Float32Array(66);
+                for (let i = 0; i < 33; i++) { a[i * 2] = 1 - sm[i].x; a[i * 2 + 1] = sm[i].y; }
+                rec.frames.push(a);
             }
-            
-            requestAnimationFrame(gameLoop);
+            if (now - rec.start >= REC_SECONDS * 1000) {
+                clones.push({ frames: rec.frames, c: CLONE_COLORS[clones.length % 3], t0: now, skin: cfg.skin });
+                rec = null; GC.beep(660, 0.25, 'triangle', 0.15);
+                buildToolbar();
+            }
         }
+        function cloneP(cl, now) {
+            const f = Math.floor((now - cl.t0) / (1000 / FPS_REC)) % cl.frames.length, a = cl.frames[f];
+            return (i) => ({ x: stage.x + a[i * 2] * stage.w, y: stage.y + a[i * 2 + 1] * stage.h });
+        }
+
+        /* ---------------- وضع تحدي الأوضاع ---------------- */
+        // الزوايا بالدرجات في إحداثيات الشاشة (y للأسفل): 0 = يمين، 90 = أسفل، 180 = يسار، -90 = أعلى
+        // l/r: الذراع على يسار/يمين الشاشة | u: العضد، f: الساعد | t: الفخذ، s: الساق
+        const POSES = [
+            { n: 'ذراعاك جانباً (T)',      a: { lu: 180, lf: 180, ru: 0, rf: 0 } },
+            { n: 'ارفع ذراعيك (Y)',        a: { lu: -135, lf: -135, ru: -45, rf: -45 } },
+            { n: 'ارفع يدك اليمنى',        a: { ru: -90, rf: -90, lu: 90, lf: 90 } },
+            { n: 'ارفع يدك اليسرى',        a: { lu: -90, lf: -90, ru: 90, rf: 90 } },
+            { n: 'انتباه: ذراعاك لأسفل',   a: { lu: 90, lf: 90, ru: 90, rf: 90 } },
+            { n: 'العضلات 💪',             a: { lu: 180, lf: -90, ru: 0, rf: -90 } },
+            { n: 'يداك على الخصر',         a: { lu: 135, lf: 45, ru: 45, rf: 135 } },
+            { n: 'النجمة ⭐ (ذراع وساق)',   a: { lu: -135, lf: -135, ru: -45, rf: -45, lt: 108, ls: 108, rt: 72, rs: 72 } },
+            { n: 'ذراع للأعلى وأخرى جانباً', a: { ru: -90, rf: -90, lu: 180, lf: 180 } },
+            { n: 'ذراع مائلة للأعلى',       a: { lu: -135, lf: -135, ru: 0, rf: 0 } }
+        ];
+        // الجهة اليسرى على الشاشة = جانب المستخدم الأيسر (المرآة) = المعالم 11/13/15 و23/25/27
+        const SEG = { lu: [11, 13], lf: [13, 15], ru: [12, 14], rf: [14, 16], lt: [23, 25], ls: [25, 27], rt: [24, 26], rs: [26, 28] };
+        const POSE_ROUNDS = 8;
+        let pose = { state: 'idle', order: [], i: 0, until: 0, hold: 0, score: 0, streak: 0, ok: 0, bestFlash: 0 };
+
+        const angDiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+        function segAngle(k) { const [a, b] = SEG[k]; const p = live(a), q = live(b); return Math.atan2(q.y - p.y, q.x - p.x) * 180 / Math.PI; }
+        function poseMatch(target) {
+            let sum = 0, max = 0, n = 0;
+            for (const k in target) { const d = angDiff(segAngle(k), target[k]); sum += d; max = Math.max(max, d); n++; }
+            return { mean: sum / n, max };
+        }
+        function startPose(now) {
+            const order = POSES.map((_, i) => i).sort(() => Math.random() - 0.5).slice(0, POSE_ROUNDS);
+            pose = { state: 'ready', order, i: 0, until: now + 3000, hold: 0, score: 0, streak: 0, ok: 0, flash: 0 };
+        }
+        function roundTime() { return Math.max(5.5, 10 - pose.i * 0.5); }
+        function updatePose(now, dt) {
+            if (pose.state === 'ready') { if (now >= pose.until) { pose.state = 'round'; pose.until = now + roundTime() * 1000; pose.hold = 0; GC.beep(880, 0.15, 'square', 0.12); } return; }
+            if (pose.state === 'ok' || pose.state === 'miss') { if (now >= pose.until) nextRound(now); return; }
+            if (pose.state !== 'round') return;
+            const tgt = POSES[pose.order[pose.i]].a;
+            if (hasBody(now)) {
+                const m = poseMatch(tgt);
+                pose.acc = Math.max(0, 1 - m.mean / 55);
+                if (m.mean <= 24 && m.max <= 50) pose.hold += dt; else pose.hold = Math.max(0, pose.hold - dt * 2);
+            }
+            if (pose.hold >= 0.7) {
+                const left = (pose.until - now) / 1000;
+                const pts = 100 + Math.round(left * 15) + pose.streak * 20;
+                pose.score += pts; pose.streak++; pose.ok++; pose.gain = pts;
+                pose.state = 'ok'; pose.until = now + 1200;
+                for (let k = 0; k < 40; k++) particles.push({ x: stage.x + stage.w / 2, y: stage.y + stage.h * 0.4, vx: (Math.random() - 0.5) * 12, vy: (Math.random() - 0.7) * 12, life: 1, c: ['#facc15', '#66fcf1', '#f472b6'][k % 3] });
+                [523, 659, 784].forEach((f, k) => GC.beep(f, 0.15, 'triangle', 0.15, k * 0.08));
+            } else if (now >= pose.until) {
+                pose.streak = 0; pose.state = 'miss'; pose.until = now + 1000; GC.beep(220, 0.3, 'sawtooth', 0.12);
+            }
+        }
+        function nextRound(now) {
+            pose.i++;
+            if (pose.i >= pose.order.length) { endPose(); return; }
+            pose.state = 'round'; pose.until = now + roundTime() * 1000; pose.hold = 0;
+        }
+        function endPose() {
+            const best = GC.store.get('twin_pose_best');
+            let msg = `نجحت في ${pose.ok} من ${pose.order.length} أوضاع — النقاط: ${pose.score}`;
+            if (pose.score > best) { GC.store.set('twin_pose_best', pose.score); msg += '<br>🎉 رقم قياسي جديد!'; }
+            else msg += `<br>أفضل نتيجة: ${best}`;
+            pose.state = 'done';
+            showMenu('انتهى التحدي 🎯', msg);
+        }
+        function drawGhost(tgt, now) {
+            // الهيكل الشبحي يبدأ من أكتاف/أوراك اللاعب الحالية وبأطوال أطرافه
+            const S = (k) => live(SEG[k][0]);
+            const len = (k) => { const p = live(SEG[k][0]), q = live(SEG[k][1]); return Math.hypot(p.x - q.x, p.y - q.y) || 60; };
+            ctx.lineCap = 'round'; ctx.lineWidth = 12;
+            const pulse = 0.55 + 0.25 * Math.sin(now / 200);
+            const ok = pose.hold > 0.05;
+            ctx.strokeStyle = ok ? `rgba(74,222,128,${pulse})` : `rgba(250,204,21,${pulse})`;
+            ctx.setLineDash([14, 10]);
+            ['l', 'r'].forEach(sd => {
+                [['u', 'f'], ['t', 's']].forEach(([a, b]) => {
+                    const ka = sd + a, kb = sd + b;
+                    if (tgt[ka] === undefined) return;
+                    const p0 = S(ka);
+                    const A = tgt[ka] * Math.PI / 180, B = (tgt[kb] === undefined ? tgt[ka] : tgt[kb]) * Math.PI / 180;
+                    const p1 = { x: p0.x + Math.cos(A) * len(ka), y: p0.y + Math.sin(A) * len(ka) };
+                    const p2 = { x: p1.x + Math.cos(B) * len(kb), y: p1.y + Math.sin(B) * len(kb) };
+                    ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+                    ctx.beginPath(); ctx.arc(p2.x, p2.y, 14, 0, 7); ctx.stroke();
+                });
+            });
+            ctx.setLineDash([]);
+        }
+
+        /* ---------------- وضع فرقعة الطاقة ---------------- */
+        let pop = { state: 'idle', orbs: [], score: 0, until: 0, spawnT: 0, combo: 0, shake: 0, popups: [], best: 0 };
+        const POP_TIME = 60;
+        function startPop(now) { pop = { state: 'ready', orbs: [], score: 0, until: now + 3000, spawnT: 0, combo: 0, shake: 0, popups: [], end: 0 }; }
+        function updatePop(now, dt) {
+            if (pop.state === 'ready') { if (now >= pop.until) { pop.state = 'play'; pop.end = now + POP_TIME * 1000; GC.beep(880, 0.15, 'square', 0.12); } return; }
+            if (pop.state !== 'play') return;
+            const t = (POP_TIME * 1000 - (pop.end - now)) / 1000;
+            pop.spawnT -= dt;
+            if (pop.spawnT <= 0) {
+                pop.spawnT = Math.max(0.35, 0.95 - t * 0.01);
+                const r = Math.random();
+                const type = r < 0.14 ? 'bomb' : r < 0.26 ? 'gold' : 'good';
+                const size = type === 'gold' ? 0.045 : 0.065;
+                pop.orbs.push({ x: 0.1 + Math.random() * 0.8, y: 0.12 + Math.random() * 0.76, r: size, type, born: now, life: type === 'gold' ? 1.8 : 3.2, drift: Math.random() * 6 });
+            }
+            const pts = [0, 15, 16, 19, 20, 27, 28, 31, 32].filter(i => sm[i].v > 0.35).map(i => live(i));
+            for (let i = pop.orbs.length - 1; i >= 0; i--) {
+                const o = pop.orbs[i], age = (now - o.born) / 1000;
+                if (age > o.life) { pop.orbs.splice(i, 1); if (o.type !== 'bomb') pop.combo = 0; continue; }
+                const ox = stage.x + (o.x + Math.sin(now / 700 + o.drift) * 0.012) * stage.w, oy = stage.y + o.y * stage.h, or = o.r * stage.w;
+                if (age < 0.25) continue;
+                if (hasBody(now) && pts.some(p => Math.hypot(p.x - ox, p.y - oy) < or + 14)) {
+                    pop.orbs.splice(i, 1);
+                    if (o.type === 'bomb') { pop.score = Math.max(0, pop.score - 25); pop.combo = 0; pop.shake = 0.4; pop.popups.push({ x: ox, y: oy, t: 1, txt: '-25 💣', c: '#f87171' }); GC.beep(110, 0.35, 'sawtooth', 0.2, 0, 50); GC.vibrate(100); }
+                    else { pop.combo++; const gain = (o.type === 'gold' ? 30 : 10) * (1 + Math.min(4, Math.floor(pop.combo / 5))); pop.score += gain; pop.popups.push({ x: ox, y: oy, t: 1, txt: '+' + gain, c: o.type === 'gold' ? '#fde047' : '#67e8f9' }); GC.beep(700 + Math.min(pop.combo, 12) * 50, 0.08, 'sine', 0.14); }
+                    for (let k = 0; k < 12; k++) particles.push({ x: ox, y: oy, vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8, life: 1, c: o.type === 'bomb' ? '#f87171' : o.type === 'gold' ? '#fde047' : '#67e8f9' });
+                }
+            }
+            pop.popups.forEach(p => { p.t -= dt; p.y -= 30 * dt; }); pop.popups = pop.popups.filter(p => p.t > 0);
+            if (pop.shake > 0) pop.shake -= dt;
+            if (now >= pop.end) endPop();
+        }
+        function endPop() {
+            const best = GC.store.get('twin_pop_best');
+            let msg = `نقاطك: ${pop.score}`;
+            if (pop.score > best) { GC.store.set('twin_pop_best', pop.score); msg += '<br>🎉 رقم قياسي جديد!'; } else msg += `<br>أفضل نتيجة: ${best}`;
+            pop.state = 'done';
+            showMenu('انتهى الوقت 💥', msg);
+        }
+        function drawOrbs(now) {
+            pop.orbs.forEach(o => {
+                const age = (now - o.born) / 1000, appear = Math.min(1, age / 0.25), fade = age > o.life - 0.6 ? (o.life - age) / 0.6 : 1;
+                const ox = stage.x + (o.x + Math.sin(now / 700 + o.drift) * 0.012) * stage.w, oy = stage.y + o.y * stage.h;
+                const r = o.r * stage.w * appear * (1 + 0.05 * Math.sin(now / 150));
+                const col = o.type === 'bomb' ? '#ef4444' : o.type === 'gold' ? '#facc15' : '#22d3ee';
+                const g = ctx.createRadialGradient(ox - r * 0.3, oy - r * 0.3, r * 0.1, ox, oy, r);
+                g.addColorStop(0, '#fff'); g.addColorStop(0.35, col); g.addColorStop(1, shade(col, -0.35));
+                ctx.globalAlpha = Math.max(0, fade);
+                ctx.beginPath(); ctx.arc(ox, oy, r, 0, 7); ctx.fillStyle = g; ctx.shadowColor = col; ctx.shadowBlur = 20; ctx.fill(); ctx.shadowBlur = 0;
+                if (o.type === 'bomb') { ctx.font = `${r * 1.1}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.fillText('💣', ox, oy + r * 0.05); }
+                ctx.globalAlpha = 1;
+            });
+        }
+
+        /* ---------------- القوائم وأشرطة الأدوات ---------------- */
+        const MODE_NAMES = { free: '🪞 المرآة الحرّة', pose: '🎯 تحدي الأوضاع', pop: '💥 فرقعة الطاقة', clone: '👯 الاستنساخ' };
+
+        function showMenu(title, msg) {
+            running = false;
+            mode = null;
+            topbar.classList.add('hidden'); toolbar.classList.add('hidden');
+            warn.style.display = 'none';
+            loader.classList.add('hidden');
+            titleEl.textContent = title || 'التوأم الرقمي';
+            descEl.innerHTML = msg || 'اختر وضع اللعب. قف على بعد مترين تقريباً من الكاميرا ليظهر جسمك بالكامل.';
+            modesEl.classList.remove('hidden');
+            overlay.classList.remove('hidden');
+            layout();
+        }
+
+        function startMode(m) {
+            GC.audioInit();
+            mode = m; running = true;
+            overlay.classList.add('hidden');
+            topbar.classList.remove('hidden');
+            modeTitle.textContent = MODE_NAMES[m];
+            scoreBox.textContent = '';
+            particles = []; trailBuf.length = 0;
+            const now = performance.now();
+            if (m === 'pose') startPose(now);
+            if (m === 'pop') startPop(now);
+            if (m === 'clone') { clones = []; rec = null; recCountdown = 0; }
+            buildToolbar();
+        }
+
+        const SKINS = [['neon', '⚡ نيون'], ['robot', '🤖 روبوت'], ['cartoon', '🧸 كرتون'], ['stars', '✨ نجوم']];
+        const COLORS = ['#66fcf1', '#f472b6', '#facc15', '#a78bfa', '#34d399', '#fb923c'];
+        const BGS = [['grid', '▦'], ['space', '🌌'], ['stage', '🎭']];
+
+        function buildToolbar() {
+            toolbar.innerHTML = '';
+            if (mode !== 'free' && mode !== 'clone') { toolbar.classList.add('hidden'); layout(); return; }
+            toolbar.classList.remove('hidden');
+            const grp = (label) => { const g = document.createElement('div'); g.className = 'grp'; if (label) { const l = document.createElement('label'); l.textContent = label; g.appendChild(l); } toolbar.appendChild(g); return g; };
+            const btn = (g, text, cls, fn, on) => { const b = document.createElement('button'); b.className = (cls || 'tb') + (on ? ' on' : ''); b.textContent = text; b.addEventListener('click', fn); g.appendChild(b); return b; };
+
+            if (mode === 'clone') {
+                const g = grp('');
+                const canRec = clones.length < 3 && !rec && !recCountdown;
+                const rb = btn(g, clones.length >= 3 ? 'الحد 3 نسخ' : '⏺ سجّل نسخة (6 ث)', 'tb', () => { startRecording(performance.now()); buildToolbar(); });
+                rb.disabled = !canRec; if (!canRec) rb.style.opacity = 0.5;
+                btn(g, '🗑 مسح النسخ', 'tb', () => { clones = []; buildToolbar(); });
+            }
+            const gs = grp('الشكل');
+            SKINS.forEach(([k, t]) => btn(gs, t, 'tb', () => { cfg.skin = k; saveCfg(); buildToolbar(); }, cfg.skin === k));
+            const gc = grp('اللون');
+            COLORS.forEach(c => { const b = btn(gc, '', 'tb dot' + (cfg.color === c ? ' on' : ''), () => { cfg.color = c; saveCfg(); buildToolbar(); }); b.style.background = c; });
+            if (mode === 'free') {
+                const gb = grp('الخلفية');
+                BGS.forEach(([k, t]) => btn(gb, t, 'tb', () => { cfg.bg = k; saveCfg(); buildToolbar(); }, cfg.bg === k));
+                const gf = grp('');
+                btn(gf, '🌀 أثر', 'tb', () => { cfg.trails = !cfg.trails; saveCfg(); buildToolbar(); }, cfg.trails);
+                btn(gf, '⚡ شرر', 'tb', () => { cfg.sparks = !cfg.sparks; saveCfg(); buildToolbar(); }, cfg.sparks);
+            }
+            const gp = grp('');
+            btn(gp, '📸 صورة', 'tb', snapshot);
+            layout();
+        }
+        document.getElementById('menuBtn').addEventListener('click', () => showMenu());
+        modesEl.addEventListener('click', (e) => { const b = e.target.closest('.mode'); if (b && !b.disabled) startMode(b.dataset.mode); });
+
+        function snapshot() {
+            draw(performance.now());
+            canvas.toBlob((blob) => {
+                if (!blob) return;
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob); a.download = 'twin-' + Date.now() + '.png';
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+                GC.beep(1200, 0.08, 'square', 0.1);
+            });
+        }
+
+        /* ---------------- الرسم الرئيسي ---------------- */
+        function drawText(t, x, y, size, color, glow) {
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `800 ${size}px Tahoma`;
+            ctx.fillStyle = color; if (glow) { ctx.shadowColor = glow; ctx.shadowBlur = 18; }
+            ctx.fillText(t, x, y); ctx.shadowBlur = 0;
+        }
+
+        function draw(now) {
+            GC.begin(ctx);
+            ctx.clearRect(0, 0, w, h);
+            drawBackground(now);
+            if (!mode) return;
+            const dt = draw.dt || 0.016;
+            const body = hasBody(now);
+            ctx.save();
+            if (mode === 'pop' && pop.shake > 0) ctx.translate((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12);
+
+            // الأثر
+            if (mode === 'free' && cfg.trails && body) {
+                trailBuf.forEach((fr, k) => {
+                    const a = (k + 1) / trailBuf.length * 0.22;
+                    ctx.globalAlpha = a; ctx.strokeStyle = cfg.color; ctx.lineWidth = 6; ctx.lineCap = 'round';
+                    ctx.beginPath();
+                    [[11, 13], [13, 15], [12, 14], [14, 16], [11, 12], [23, 24], [11, 23], [12, 24], [23, 25], [25, 27], [24, 26], [26, 28]].forEach(([a1, b1]) => {
+                        ctx.moveTo(stage.x + fr[a1 * 2] * stage.w, stage.y + fr[a1 * 2 + 1] * stage.h); ctx.lineTo(stage.x + fr[b1 * 2] * stage.w, stage.y + fr[b1 * 2 + 1] * stage.h);
+                    });
+                    ctx.stroke();
+                });
+                ctx.globalAlpha = 1;
+            }
+            // النسخ المسجّلة
+            if (mode === 'clone') clones.forEach(cl => drawFigure(cloneP(cl, now), cl.skin, cl.c, 0.85, now));
+
+            if (mode === 'pose' && pose.state === 'round' && body) drawGhost(POSES[pose.order[pose.i]].a, now);
+            if (mode === 'pop') drawOrbs(now);
+
+            // التوأم الحي
+            if (hasInit) {
+                const alpha = body ? 1 : 0.35;
+                drawFigure(live, cfg.skin, cfg.color, alpha, now);
+                if (mode === 'free' && cfg.sparks && body) { addSparks(15, now); addSparks(16, now); addSparks(27, now); addSparks(28, now); }
+            }
+            drawParticles(dt);
+            ctx.restore();
+
+            // واجهة كل وضع
+            const big = Math.max(34, Math.min(w, h) * 0.12);
+            if (mode === 'pose') {
+                scoreBox.textContent = `⭐ ${pose.score}`;
+                const cx = w / 2;
+                if (pose.state === 'ready') { drawText(Math.ceil((pose.until - now) / 1000) || '', cx, h * 0.4, big * 1.4, '#fde047', '#000'); drawText('استعد لتقليد الأوضاع!', cx, h * 0.4 + big, Math.max(18, big * 0.4), '#fff'); }
+                else if (pose.state === 'round' || pose.state === 'ok' || pose.state === 'miss') {
+                    const P = POSES[pose.order[Math.min(pose.i, pose.order.length - 1)]];
+                    ctx.fillStyle = 'rgba(7,11,20,0.7)'; ctx.beginPath(); ctx.roundRect(cx - Math.min(w * 0.45, 260), 58, Math.min(w * 0.9, 520), 54, 14); ctx.fill();
+                    drawText(`${pose.i + 1}/${pose.order.length}  ${P.n}`, cx, 85, Math.max(16, Math.min(w * 0.045, 26)), '#fff');
+                    // شريط الوقت وشريط التثبيت
+                    const bw = Math.min(w * 0.7, 360), bx = cx - bw / 2;
+                    const frac = pose.state === 'round' ? Math.max(0, (pose.until - now) / 1000 / roundTime()) : 0;
+                    ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(bx, h - 40 - (toolbar.classList.contains('hidden') ? 0 : 60), bw, 10);
+                    ctx.fillStyle = frac < 0.3 ? '#f87171' : '#60a5fa'; ctx.fillRect(bx, h - 40 - (toolbar.classList.contains('hidden') ? 0 : 60), bw * frac, 10);
+                    ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(bx, h - 26, bw, 8);
+                    ctx.fillStyle = '#4ade80'; ctx.fillRect(bx, h - 26, bw * Math.min(1, pose.hold / 0.7), 8);
+                    if (pose.state === 'ok') drawText(`ممتاز! +${pose.gain} 🎉`, cx, h * 0.45, big * 0.7, '#4ade80', '#000');
+                    if (pose.state === 'miss') drawText('انتهى الوقت ⏱️', cx, h * 0.45, big * 0.7, '#f87171', '#000');
+                    if (pose.streak > 1 && pose.state !== 'miss') drawText(`🔥 ${pose.streak} متتالية`, cx, 130, 18, '#fb923c');
+                }
+            } else if (mode === 'pop') {
+                scoreBox.textContent = `⭐ ${pop.score}`;
+                if (pop.state === 'ready') { drawText(Math.ceil((pop.until - now) / 1000) || '', w / 2, h * 0.4, big * 1.4, '#fde047', '#000'); drawText('المس الكرات الزرقاء والذهبية بيديك وقدميك، وتجنّب القنابل 💣', w / 2, h * 0.4 + big, Math.max(14, big * 0.28), '#fff'); }
+                else if (pop.state === 'play') {
+                    const left = Math.max(0, (pop.end - now) / 1000);
+                    drawText(`⏱ ${Math.ceil(left)}`, w / 2, 78, 22, left < 10 ? '#f87171' : '#fff');
+                    if (pop.combo > 2) drawText(`🔥 x${1 + Math.min(4, Math.floor(pop.combo / 5))} (${pop.combo})`, w / 2, 106, 18, '#fb923c');
+                    pop.popups.forEach(p => { ctx.globalAlpha = Math.max(0, p.t); drawText(p.txt, p.x, p.y, 26, p.c); ctx.globalAlpha = 1; });
+                }
+            } else if (mode === 'clone') {
+                scoreBox.textContent = `${clones.length}/3 نسخ`;
+                if (recCountdown) drawText(Math.ceil((recCountdown - now) / 1000), w / 2, h * 0.4, big * 1.4, '#fde047', '#000');
+                if (rec) {
+                    const t = (now - rec.start) / 1000;
+                    ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(w / 2 - 50, 80, 8 + 2 * Math.sin(now / 120), 0, 7); ctx.fill();
+                    drawText(`تسجيل ${t.toFixed(1)} / ${REC_SECONDS}`, w / 2 + 6, 80, 20, '#fff');
+                } else if (!recCountdown && clones.length === 0) drawText('اضغط «سجّل نسخة» ثم تحرك أو ارقص لمدة 6 ثوانٍ', w / 2, 84, Math.max(14, Math.min(w * 0.04, 20)), '#b8c7d6');
+            }
+        }
+
+        /* ---------------- الحلقة الرئيسية ---------------- */
+        let lastT = performance.now(), recT = 0;
+        function loop(now) {
+            const dt = Math.min((now - lastT) / 1000, 0.05);
+            lastT = now; draw.dt = dt;
+            if (running) {
+                if (hasInit && now - lastSeen < 800) smooth(dt);
+                warn.style.display = (camReady && !hasBody(now) && mode) ? 'block' : 'none';
+                if (mode === 'free' && cfg.trails && hasBody(now)) {
+                    recT += dt;
+                    if (recT > 0.06) { recT = 0; const a = new Float32Array(66); for (let i = 0; i < 33; i++) { a[i * 2] = 1 - sm[i].x; a[i * 2 + 1] = sm[i].y; } trailBuf.push(a); if (trailBuf.length > 9) trailBuf.shift(); }
+                }
+                if (mode === 'clone') updateRecording(now);
+                if (mode === 'pose') updatePose(now, dt);
+                if (mode === 'pop') updatePop(now, dt);
+            }
+            draw(now);
+            requestAnimationFrame(loop);
+        }
+
+        /* ---------------- الكاميرا ---------------- */
+        function initAI() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof Pose === 'undefined') {
+                loader.classList.add('hidden'); titleEl.textContent = 'المتصفح غير مدعوم'; descEl.textContent = 'يتطلب هذا التطبيق كاميرا ومتصفحاً حديثاً (يفضّل كروم).'; return;
+            }
+            const pose = new Pose({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}` });
+            const mobile = /Android|iPhone|iPad|Mobi/i.test(navigator.userAgent);
+            pose.setOptions({ modelComplexity: mobile ? 0 : 1, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.55, minTrackingConfidence: 0.55 });
+            pose.onResults(onPose);
+            const camera = new Camera(video, {
+                onFrame: async () => { if (running) await pose.send({ image: video }); },
+                width: 640, height: 480, facingMode: 'user'
+            });
+            camera.start().then(() => { camReady = true; layout(); showMenu(); })
+                .catch(() => {
+                    loader.classList.add('hidden'); titleEl.style.color = '#fb7185';
+                    titleEl.textContent = 'تعذر فتح الكاميرا';
+                    descEl.textContent = 'اسمح للمتصفح باستخدام الكاميرا ثم حدّث الصفحة.';
+                });
+            video.addEventListener('loadedmetadata', layout);
+        }
+
+        requestAnimationFrame(loop);
+        initAI();
     </script>
     <script src="remote-nav.js"></script>
 </body>

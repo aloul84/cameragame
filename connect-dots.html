@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>وصّل النقاط</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="game-common.js"></script>
+    <script src="edu-common.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1d1a2f; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = EDU.makeVideo();
+        let w = 0, h = 0;
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; });
+
+        /* ---------------- الصور (نقاط بإحداثيات 0..1 بالترتيب) ---------------- */
+        const star = (() => { const p = []; for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 0.2 : 0.46; p.push([0.5 + Math.cos(a) * r, 0.52 + Math.sin(a) * r]); } return p; })();
+        const PICS = [
+            { n: 'تاج', e: '👑', c: '#facc15', fact: 'التاج يلبسه الملوك.', pts: [[0.1, 0.8], [0.1, 0.3], [0.3, 0.55], [0.5, 0.2], [0.7, 0.55], [0.9, 0.3], [0.9, 0.8]] },
+            { n: 'معيّن', e: '💎', c: '#38bdf8', fact: 'المعيّن شكل له أربعة أضلاع متساوية.', pts: [[0.5, 0.05], [0.68, 0.25], [0.9, 0.45], [0.7, 0.65], [0.5, 0.95], [0.3, 0.65], [0.1, 0.45], [0.32, 0.25]] },
+            { n: 'سمكة', e: '🐟', c: '#22d3ee', fact: 'السمك يتنفس بالخياشيم تحت الماء.', pts: [[0.1, 0.5], [0.3, 0.3], [0.55, 0.25], [0.75, 0.4], [0.9, 0.2], [0.9, 0.8], [0.75, 0.6], [0.55, 0.75], [0.3, 0.7]] },
+            { n: 'نجمة', e: '⭐', c: '#fde047', fact: 'النجوم كرات ضخمة من الغاز المشتعل.', pts: star },
+            { n: 'بيت', e: '🏠', c: '#f97316', fact: 'البيت مكان الأمان والعائلة.', pts: [[0.5, 0.08], [0.92, 0.46], [0.8, 0.46], [0.8, 0.92], [0.6, 0.92], [0.6, 0.68], [0.4, 0.68], [0.4, 0.92], [0.2, 0.92], [0.2, 0.46], [0.08, 0.46]] },
+            { n: 'صاروخ', e: '🚀', c: '#a78bfa', fact: 'الصواريخ تنطلق إلى الفضاء بقوة الدفع.', pts: [[0.5, 0.05], [0.65, 0.25], [0.65, 0.65], [0.82, 0.8], [0.82, 0.92], [0.62, 0.82], [0.38, 0.82], [0.18, 0.92], [0.18, 0.8], [0.35, 0.65], [0.35, 0.25]] },
+            { n: 'شجرة', e: '🌲', c: '#22c55e', fact: 'الأشجار تنتج الأكسجين الذي نتنفسه.', pts: [[0.5, 0.05], [0.75, 0.35], [0.62, 0.35], [0.85, 0.65], [0.58, 0.65], [0.58, 0.9], [0.42, 0.9], [0.42, 0.65], [0.15, 0.65], [0.38, 0.35], [0.25, 0.35]] },
+            { n: 'قارب', e: '⛵', c: '#60a5fa', fact: 'الشراع يلتقط الرياح لتدفع القارب.', pts: [[0.5, 0.08], [0.86, 0.52], [0.56, 0.52], [0.56, 0.7], [0.92, 0.7], [0.76, 0.92], [0.24, 0.92], [0.08, 0.7], [0.44, 0.7], [0.44, 0.4]] },
+            { n: 'قلب', e: '❤️', c: '#f43f5e', fact: 'القلب يضخّ الدم إلى كل الجسم.', pts: [[0.5, 0.3], [0.38, 0.12], [0.2, 0.1], [0.08, 0.28], [0.12, 0.5], [0.5, 0.92], [0.88, 0.5], [0.92, 0.28], [0.8, 0.1], [0.62, 0.12]] },
+            { n: 'هلال', e: '🌙', c: '#fbbf24', fact: 'القمر يدور حول الأرض ويتغيّر شكله في الشهر.', pts: [[0.62, 0.08], [0.4, 0.14], [0.22, 0.3], [0.14, 0.5], [0.22, 0.7], [0.4, 0.86], [0.62, 0.92], [0.45, 0.78], [0.36, 0.62], [0.36, 0.4], [0.45, 0.22]] }
+        ];
+
+        /* ---------------- القواعد: ما تكتبه على النقاط ---------------- */
+        const AB = 'أبتثجحخدذرزسشصضطظعغفقكلمنهوي'.split(''), EN = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+        const seq = (n, f) => Array.from({ length: n }, (_, i) => f(i));
+        const ar = (x) => EDU.toAr(x);
+        const LEVELS = [
+            { name: 'العدّ من ١', sub: '١ ٢ ٣ ٤', max: 8, rule: 'عُدّ من ١ بالترتيب', labels: (n) => seq(n, i => ar(i + 1)), lesson: 'وصّل النقاط بالترتيب: ١ ثم ٢ ثم ٣...' },
+            { name: 'العدّ الأطول', sub: 'حتى ١٢', max: 12, rule: 'عُدّ بالترتيب', labels: (n) => seq(n, i => ar(i + 1)), lesson: 'أعداد أكثر! ابحث عن الرقم التالي.' },
+            { name: 'العدّ بالاثنين', sub: '٢ ٤ ٦ ٨', max: 11, rule: 'عُدّ قفزاً بالاثنين', labels: (n) => seq(n, i => ar((i + 1) * 2)), lesson: 'القفز بالاثنين: ٢، ٤، ٦...' },
+            { name: 'العدّ بالخمسات', sub: '٥ ١٠ ١٥', max: 11, rule: 'عُدّ قفزاً بالخمسات', labels: (n) => seq(n, i => ar((i + 1) * 5)), lesson: 'القفز بالخمسات: ٥، ١٠، ١٥...' },
+            { name: 'العدّ بالعشرات', sub: '١٠ ٢٠ ٣٠', max: 11, rule: 'عُدّ قفزاً بالعشرات', labels: (n) => seq(n, i => ar((i + 1) * 10)), lesson: 'القفز بالعشرات: ١٠، ٢٠، ٣٠...' },
+            { name: 'الحروف الهجائية', sub: 'أ ب ت ث', max: 11, rule: 'رتّب الحروف الهجائية العربية', labels: (n) => seq(n, i => AB[i]), lesson: 'الحروف الهجائية بالترتيب: أ، ب، ت، ث...' },
+            { name: 'العدّ التنازلي', sub: '١٠ ٩ ٨', max: 11, rule: 'ابدأ من أكبر رقم وانزل', labels: (n) => seq(n, i => ar(n - i)), lesson: 'ابدأ من أكبر رقم ثم انزل إلى ١.' },
+            { name: 'ABC', sub: 'English letters', max: 11, rule: 'رتّب الحروف الإنجليزية', labels: (n) => seq(n, i => EN[i]), lesson: 'English alphabet: A, B, C, D...' },
+            { name: 'فردي وزوجي', sub: '١ ٣ ٥ / ٢ ٤ ٦', max: 11, rule: null, labels: (n, v) => seq(n, i => ar(v ? (i + 1) * 2 : i * 2 + 1)), lesson: 'الأعداد الفردية: ١، ٣، ٥… الزوجية: ٢، ٤، ٦…', variant: true },
+            { name: 'جدول الضرب', sub: '×٣ ×٤', max: 11, rule: null, labels: (n, v) => seq(n, i => ar((i + 1) * (v ? 4 : 3))), lesson: 'مضاعفات العدد: ٣، ٦، ٩… أو ٤، ٨، ١٢…', variant: true }
+        ];
+        const PICS_PER_LEVEL = 3;
+
+        let level = 0, pi = 0, pic = null, labels = [], next = 0, mistakes = 0, phase = 'MENU', rule = '';
+        let dwellIdx = -1, dwell = 0, cursor = null, lastCurT = 0, ptrDown = false, board = { x: 0, y: 0, s: 1 };
+        let msg = '', phaseUntil = 0, flash = 0, lastT = performance.now(), cameraOK = false, doneT = 0;
+
+        const menu = EDU.init({
+            id: 'cd', title: 'وصّل النقاط', emoji: '✏️', color: '#a78bfa', bg1: '#3b2a6b', bg2: '#0b0818',
+            levels: LEVELS, onStart: startLevel
+        });
+        let used = [];
+        function startLevel(i) { level = i; pi = 0; mistakes = 0; used = []; EDU.fx.list = []; newPic(performance.now()); }
+        function newPic(now) {
+            const L = LEVELS[level];
+            const cands = PICS.filter(p => p.pts.length <= L.max && !used.includes(p));
+            pic = EDU.pick(cands.length ? cands : PICS.filter(p => p.pts.length <= L.max)); used.push(pic);
+            const v = Math.random() < 0.5; const n = pic.pts.length;
+            labels = L.labels(n, v);
+            rule = L.rule || (L.name === 'فردي وزوجي' ? (v ? 'عُدّ بالأعداد الزوجية' : 'عُدّ بالأعداد الفردية') : (v ? 'عُدّ بجدول الضرب ×٤' : 'عُدّ بجدول الضرب ×٣'));
+            next = 0; dwellIdx = -1; dwell = 0; phase = pi === 0 ? 'INTRO' : 'PLAY'; phaseUntil = now + 2800; msg = '';
+        }
+        function endLevel() {
+            phase = 'MENU';
+            const stars = mistakes <= 3 ? 3 : mistakes <= 7 ? 2 : 1;
+            menu.finish(stars, `أتممت ${PICS_PER_LEVEL} رسمات • أخطاء: ${mistakes}`, level);
+        }
+
+        /* ---------------- القلم: السبابة أو الفأرة/اللمس ---------------- */
+        function onHands(res) {
+            const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
+            if (!lm) { if (performance.now() - lastCurT > 500) cursor = null; return; }
+            const cl = (v) => Math.max(0, Math.min(1, (v - 0.1) / 0.8));
+            cursor = { x: cl(1 - lm[8].x) * w, y: cl(lm[8].y) * h, src: 'hand' }; lastCurT = performance.now();
+        }
+        window.addEventListener('pointermove', (e) => { if (e.target.closest && e.target.closest('button, .edu-overlay')) return; cursor = { x: e.clientX, y: e.clientY, src: 'ptr' }; lastCurT = performance.now(); });
+        window.addEventListener('pointerdown', (e) => {
+            if (phase !== 'PLAY' || (e.target.closest && e.target.closest('button, .edu-overlay'))) return;
+            cursor = { x: e.clientX, y: e.clientY, src: 'ptr' }; lastCurT = performance.now();
+            const i = dotAt(e.clientX, e.clientY, 8); if (i === next) hit(performance.now()); else if (i >= 0) bad(performance.now());
+        });
+        function layout() {
+            const top = 118, s = Math.min(w - 24, h - top - 24); board = { x: (w - s) / 2, y: top + (h - top - s) / 2, s: Math.max(120, s) };
+        }
+        const dotPos = (i) => ({ x: board.x + pic.pts[i][0] * board.s * 0.9 + board.s * 0.05, y: board.y + pic.pts[i][1] * board.s * 0.9 + board.s * 0.05 });
+        const dotR = () => Math.max(14, Math.min(22, board.s * 0.04));
+        function dotAt(x, y, pad) { let best = -1, bd = 1e9; for (let i = 0; i < pic.pts.length; i++) { const p = dotPos(i), d = Math.hypot(p.x - x, p.y - y); if (d < dotR() + (pad || 0) && d < bd) { bd = d; best = i; } } return best; }
+
+        function hit(now) {
+            const p = dotPos(next); EDU.fx.burst(p.x, p.y, [pic.c, '#fff'], 10); GC.beep(500 + next * 60, 0.09, 'triangle', 0.14);
+            next++; dwell = 0; dwellIdx = -1;
+            if (next >= pic.pts.length) { phase = 'DONE'; phaseUntil = now + 3200; doneT = now; msg = `${pic.e} ${pic.n} — ${pic.fact}`; EDU.fx.burst(w / 2, board.y + board.s / 2, [pic.c, '#fde047', '#fff'], 60); [523, 659, 784, 1047].forEach((f, k) => GC.beep(f, 0.15, 'triangle', 0.16, k * 0.09)); EDU.speak(pic.n); }
+        }
+        function bad(now) { mistakes++; flash = 0.25; GC.beep(160, 0.2, 'sawtooth', 0.14, 0, 90); GC.vibrate(60); dwell = 0; dwellIdx = -1; }
+
+        function update(now, dt) {
+            if (flash > 0) flash -= dt;
+            if (phase === 'INTRO') { if (now >= phaseUntil) phase = 'PLAY'; return; }
+            if (phase === 'DONE') { if (now >= phaseUntil) { pi++; if (pi >= PICS_PER_LEVEL) endLevel(); else newPic(now); } return; }
+            if (phase !== 'PLAY' || !cursor || now - lastCurT > 600) { dwell = 0; return; }
+            const i = dotAt(cursor.x, cursor.y, 14);
+            if (i < 0) { dwell = 0; dwellIdx = -1; return; }
+            if (i === dwellIdx) dwell += dt; else { dwellIdx = i; dwell = 0; }
+            if (i === next && dwell >= 0.35) hit(now);
+            else if (i > next && dwell >= 0.7) bad(now);          // نقطة خاطئة بعد تثبيت طويل
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function draw(now, dt) {
+            GC.begin(ctx);
+            ctx.fillStyle = '#1d1a2f'; ctx.fillRect(0, 0, w, h);
+            if (phase === 'MENU' || !pic) return;
+            layout();
+            // الورقة
+            const pad = 10, px = board.x - pad, py = board.y - pad, ps = board.s + pad * 2;
+            ctx.save(); ctx.shadowColor = '#000'; ctx.shadowBlur = 24; ctx.fillStyle = '#fff8e7'; ctx.beginPath(); ctx.roundRect(px, py, ps, ps, 16); ctx.fill(); ctx.restore();
+            ctx.strokeStyle = 'rgba(100,140,200,0.2)'; ctx.lineWidth = 1; for (let y = py + 28; y < py + ps; y += 28) { ctx.beginPath(); ctx.moveTo(px + 8, y); ctx.lineTo(px + ps - 8, y); ctx.stroke(); }
+            // الخطوط المرسومة
+            const dn = phase === 'DONE' ? pic.pts.length : next;
+            if (phase === 'DONE') { ctx.beginPath(); for (let i = 0; i < pic.pts.length; i++) { const p = dotPos(i); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); } ctx.closePath(); ctx.fillStyle = pic.c + '88'; ctx.fill(); }
+            ctx.strokeStyle = '#334155'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath();
+            for (let i = 0; i < dn; i++) { const p = dotPos(i); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }
+            if (phase === 'DONE') ctx.closePath(); ctx.stroke();
+            if (phase === 'PLAY' && next > 0 && cursor && now - lastCurT < 600) { const a = dotPos(next - 1); ctx.strokeStyle = 'rgba(100,116,139,0.5)'; ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(cursor.x, cursor.y); ctx.stroke(); ctx.setLineDash([]); }
+            // النقاط
+            const r = dotR();
+            for (let i = 0; i < pic.pts.length; i++) {
+                const p = dotPos(i), done = i < dn, cur = i === next && phase === 'PLAY';
+                ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7);
+                ctx.fillStyle = done ? pic.c : '#fff'; ctx.fill(); ctx.strokeStyle = cur ? '#f43f5e' : '#475569'; ctx.lineWidth = cur ? 4 : 2; ctx.stroke();
+                if (cur) { ctx.strokeStyle = 'rgba(244,63,94,0.5)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y, r + 6 + Math.sin(now / 160) * 3, 0, 7); ctx.stroke(); }
+                const lab = labels[i]; EDU.text(ctx, lab, p.x, p.y + 1, lab.length > 2 ? r * 0.8 : r * 1.05, done ? '#fff' : '#0f172a');
+                if (i === dwellIdx && dwell > 0 && i >= next) { ctx.beginPath(); ctx.arc(p.x, p.y, r + 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, dwell / (i === next ? 0.35 : 0.7))); ctx.strokeStyle = i === next ? '#22c55e' : '#f59e0b'; ctx.lineWidth = 5; ctx.stroke(); }
+            }
+            if (phase === 'DONE') { ctx.font = `${board.s * 0.3}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.globalAlpha = Math.min(1, (now - doneT) / 500); ctx.fillText(pic.e, board.x + board.s / 2, board.y + board.s / 2); ctx.globalAlpha = 1; }
+            // المؤشر
+            if (cursor && now - lastCurT < 600) { ctx.beginPath(); ctx.arc(cursor.x, cursor.y, 11, 0, 7); ctx.fillStyle = '#fde047'; ctx.shadowColor = '#fde047'; ctx.shadowBlur = 14; ctx.fill(); ctx.shadowBlur = 0; ctx.strokeStyle = '#78350f'; ctx.lineWidth = 2; ctx.stroke(); }
+            if (cameraOK) { const vr = EDU.fitRect(video, { x: 10, y: h - 98, w: 120, h: 88 }); ctx.save(); ctx.beginPath(); ctx.roundRect(vr.x, vr.y, vr.w, vr.h, 8); ctx.clip(); EDU.drawVideo(ctx, video, vr, 0.8); ctx.restore(); ctx.strokeStyle = 'rgba(167,139,250,0.8)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(vr.x, vr.y, vr.w, vr.h, 8); ctx.stroke(); }
+            // الشريط العلوي
+            const L = LEVELS[level], fs = Math.max(13, Math.min(w * 0.038, 19));
+            ctx.fillStyle = 'rgba(11,8,24,0.92)'; ctx.fillRect(0, 0, w, 108);
+            ctx.textBaseline = 'middle'; ctx.font = `700 ${fs}px Tahoma`;
+            ctx.textAlign = 'right'; ctx.fillStyle = '#c4b5fd'; ctx.fillText(`المستوى ${level + 1}: ${L.name}`, w - 12, 18);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#e2e8f0'; ctx.fillText(`الرسمة ${Math.min(pi + 1, PICS_PER_LEVEL)} / ${PICS_PER_LEVEL}`, w / 2, 18);
+            ctx.textAlign = 'left'; ctx.fillStyle = '#fca5a5'; ctx.fillText(`✖ ${mistakes}`, 118, 18);
+            EDU.text(ctx, '📝 ' + rule, w / 2, 56, Math.max(15, Math.min(w * 0.048, 26)), '#fde047', '#6d28d9');
+            EDU.text(ctx, cameraOK ? '☝️ حرّك سبابتك فوق النقطة التالية لتوصيلها' : 'مرّر الفأرة أو اضغط على النقطة التالية', w / 2, 88, Math.max(12, Math.min(w * 0.032, 16)), '#cbd5e1');
+            if (phase === 'INTRO') { ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, h * 0.42, w, 70); EDU.text(ctx, L.lesson, w / 2, h * 0.42 + 35, Math.max(15, Math.min(w * 0.045, 24)), '#fde047'); }
+            if (phase === 'DONE') { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, h - 120, w, 56); EDU.text(ctx, msg, w / 2, h - 92, Math.max(14, Math.min(w * 0.04, 22)), '#fff'); }
+            if (flash > 0) { ctx.fillStyle = `rgba(248,113,113,${Math.min(0.2, flash)})`; ctx.fillRect(0, 0, w, h); }
+            EDU.fx.draw(ctx, dt);
+        }
+        function loop(now) { const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now; update(now, dt); draw(now, dt); requestAnimationFrame(loop); }
+
+        const HELP = 'وصّل النقاط بالترتيب الصحيح لتظهر الصورة! <b>حرّك سبابتك</b> أمام الكاميرا فوق النقطة التالية وثبّتها لحظة، أو مرّر الفأرة / المس النقطة. تعلّم العدّ والحروف والجداول.';
+        (async function init() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { menu.ready(HELP); return; }
+            try { await EDU.startHands(video, onHands, 1); cameraOK = true; menu.ready(HELP); }
+            catch (e) { console.error(e); menu.ready(HELP + '<br>تعذر تشغيل الكاميرا — استخدم الفأرة أو اللمس.'); }
+        })();
+        requestAnimationFrame(loop);
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

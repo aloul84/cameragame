@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>ساعة الجسم</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="game-common.js"></script>
+    <script src="edu-common.js"></script>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #140b24; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const video = EDU.makeVideo();
+        let w = 0, h = 0, portrait = false;
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; portrait = h > w * 1.05; });
+
+        /* ---------------- المستويات العشرة ----------------
+           mins: الدقائق الممكنة | type: digital (أرقام) أو phrase (عبارة عربية) | hint: إظهار العقربين المطلوبين
+           limit: ثواني السؤال | tol: تسامح [الساعة، الدقائق] بالدرجات */
+        const LEVELS = [
+            { name: 'الساعة التامة', sub: '٣:٠٠', mins: [0], type: 'digital', hint: true, limit: 40, tol: [26, 20] },
+            { name: 'والنصف', sub: '٣:٣٠', mins: [30], type: 'digital', hint: true, limit: 40, tol: [26, 20] },
+            { name: 'والربع', sub: '٣:١٥', mins: [15, 45], type: 'digital', hint: true, limit: 35, tol: [24, 18] },
+            { name: 'كل خمس دقائق', sub: '٣:٢٥', mins: [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55], type: 'digital', hint: false, limit: 35, tol: [24, 17] },
+            { name: 'اقرأ العبارة', sub: 'تماماً/والنصف', mins: [0, 30], type: 'phrase', hint: false, limit: 35, tol: [24, 18] },
+            { name: 'عبارات الربع', sub: 'وربع/خمس', mins: [0, 15, 30, 5, 10], type: 'phrase', hint: false, limit: 30, tol: [24, 17] },
+            { name: 'إلا ربعاً', sub: 'العد التنازلي', mins: [35, 40, 45, 50, 55], type: 'phrase', hint: false, limit: 30, tol: [24, 17] },
+            { name: 'سباق الوقت', sub: 'أرقام', mins: [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55], type: 'digital', hint: false, limit: 18, tol: [24, 17] },
+            { name: 'عبارات سريعة', sub: 'سريع', mins: [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55], type: 'phrase', hint: false, limit: 16, tol: [24, 17] },
+            { name: 'خبير الساعة', sub: 'دقة عالية', mins: [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55], type: 'mixed', hint: false, limit: 13, tol: [19, 14] }
+        ];
+        const Q_COUNT = 8, HOLD = 1.0;
+        const HOUR_NAMES = ['الثانية عشرة', 'الواحدة', 'الثانية', 'الثالثة', 'الرابعة', 'الخامسة', 'السادسة', 'السابعة', 'الثامنة', 'التاسعة', 'العاشرة', 'الحادية عشرة'];
+        const hn = (hr) => HOUR_NAMES[((hr % 12) + 12) % 12];
+        const PH = { 0: 'تماماً', 5: 'وخمس دقائق', 10: 'وعشر دقائق', 15: 'وربع', 20: 'وعشرون دقيقة', 25: 'وخمس وعشرون دقيقة', 30: 'والنصف' };
+        const PH2 = { 35: 'إلا خمساً وعشرين دقيقة', 40: 'إلا عشرين دقيقة', 45: 'إلا ربعاً', 50: 'إلا عشر دقائق', 55: 'إلا خمس دقائق' };
+        function phrase(hr, m) {
+            if (m <= 30) return m === 0 ? `الساعة ${hn(hr)} تماماً` : `الساعة ${hn(hr)} ${PH[m]}`;
+            return `الساعة ${hn(hr + 1)} ${PH2[m]}`;
+        }
+        const digital = (hr, m) => `${EDU.toAr(hr)}:${EDU.toAr(String(m).padStart(2, '0'))}`;
+
+        /* ---------------- الحالة ---------------- */
+        let level = 0, qi = 0, misses = 0, correct = 0, phase = 'MENU';
+        let target = null, qStart = 0, hold = 0, phaseUntil = 0, flash = 0, flashC = '', msg = '';
+        let poseLm = null, lastPoseT = 0;
+        const hand = { h: null, m: null };          // زوايا عقربي الساعة (درجات) من الذراعين
+        const manual = { h: 0, m: 0, until: 0, drag: null };
+        let cameraOK = false, lastT = performance.now(), cr = { x: 0, y: 0, w: 1, h: 1 }, camR = { x: 0, y: 0, w: 1, h: 1 }, vr = camR;
+
+        const menu = EDU.init({
+            id: 'bc', title: 'ساعة الجسم', emoji: '🕒', color: '#c084fc', bg1: '#3b1a63', bg2: '#0c0618',
+            levels: LEVELS, onStart: startLevel
+        });
+
+        function startLevel(i) {
+            level = i; qi = 0; misses = 0; correct = 0; EDU.fx.list = [];
+            manual.h = 0; manual.m = 0; manual.until = 0;
+            nextQ(performance.now());
+        }
+        function nextQ(now) {
+            if (qi >= Q_COUNT) return endLevel();
+            const L = LEVELS[level];
+            let hr = EDU.rand(1, 12), m = EDU.pick(L.mins);
+            if (target && target.hr === hr && target.m === m) hr = (hr % 12) + 1;
+            const type = L.type === 'mixed' ? EDU.pick(['digital', 'phrase']) : L.type;
+            target = { hr, m, type, ah: (hr % 12) * 30 + m * 0.5, am: m * 6 };
+            target.text = type === 'digital' ? digital(hr, m) : phrase(hr, m);
+            phase = 'Q'; qStart = now; hold = 0;
+        }
+        function endLevel() {
+            phase = 'MENU';
+            const stars = misses > 3 ? 0 : misses === 0 ? 3 : misses <= 2 ? 2 : 1;
+            menu.finish(stars, `الإجابات الصحيحة: ${correct} من ${Q_COUNT}`, level);
+        }
+
+        /* ---------------- زوايا الذراعين ---------------- */
+        function onPose(res) { if (res.poseLandmarks) { poseLm = res.poseLandmarks; lastPoseT = performance.now(); } }
+        const angDiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+        function armAngle(s, wr) {
+            const a = EDU.pt(vr, poseLm[s]), b = EDU.pt(vr, poseLm[wr]);
+            const dx = b.x - a.x, dy = b.y - a.y;
+            if (Math.hypot(dx, dy) < vr.h * 0.1 || poseLm[wr].visibility < 0.3) return null;
+            return (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;      // 0 = أعلى (الساعة 12) باتجاه عقارب الساعة
+        }
+        function smoothAng(cur, nv, k) {
+            if (nv === null) return null;
+            if (cur === null) return nv;
+            let d = ((nv - cur + 540) % 360) - 180;
+            return (cur + d * k + 360) % 360;
+        }
+        function updateAngles(now) {
+            if (now < manual.until) { hand.h = manual.h; hand.m = manual.m; return; }
+            if (poseLm && now - lastPoseT < 600) {
+                // الذراع على يسار الشاشة = عقرب الساعات، واليمنى = عقرب الدقائق
+                hand.h = smoothAng(hand.h, armAngle(11, 15), 0.35);
+                hand.m = smoothAng(hand.m, armAngle(12, 16), 0.35);
+            } else { hand.h = null; hand.m = null; }
+        }
+
+        /* ---------------- الإدخال باللمس: اسحب العقربين ---------------- */
+        function clockCenter() { return { x: cr.x + cr.w / 2, y: cr.y + cr.h / 2 + 10, r: Math.min(cr.w, cr.h) * 0.4 }; }
+        function ptrAngle(e) { const c = clockCenter(); return (Math.atan2(e.clientX - c.x, -(e.clientY - c.y)) * 180 / Math.PI + 360) % 360; }
+        window.addEventListener('pointerdown', (e) => {
+            if (phase !== 'Q' || (e.target.closest && e.target.closest('button, .edu-overlay'))) return;
+            const c = clockCenter();
+            if (Math.hypot(e.clientX - c.x, e.clientY - c.y) > c.r * 1.25) return;
+            const a = ptrAngle(e);
+            if (manual.until < performance.now()) { manual.h = hand.h === null ? 0 : hand.h; manual.m = hand.m === null ? 0 : hand.m; }
+            const dist = Math.hypot(e.clientX - c.x, e.clientY - c.y);
+            // العقرب الأقرب بالزاوية، وعند التقارب نختار حسب البعد عن المركز
+            manual.drag = (angDiff(a, manual.h) * 1.0 < angDiff(a, manual.m) * 1.0 || dist < c.r * 0.45) ? 'h' : 'm';
+            manual[manual.drag] = a; manual.until = performance.now() + 4000;
+        });
+        window.addEventListener('pointermove', (e) => { if (manual.drag) { manual[manual.drag] = ptrAngle(e); manual.until = performance.now() + 4000; } });
+        window.addEventListener('pointerup', () => { manual.drag = null; });
+
+        /* ---------------- التحديث ---------------- */
+        function update(now, dt) {
+            if (flash > 0) flash -= dt;
+            if (phase === 'RES') { if (now >= phaseUntil) { if (misses > 3) endLevel(); else nextQ(now); } return; }
+            if (phase !== 'Q') return;
+            updateAngles(now);
+            const L = LEVELS[level];
+            const okH = hand.h !== null && angDiff(hand.h, target.ah) <= L.tol[0];
+            const okM = hand.m !== null && angDiff(hand.m, target.am) <= L.tol[1];
+            if (okH && okM) hold += dt; else hold = Math.max(0, hold - dt * 1.5);
+            if (hold >= HOLD) {
+                correct++; qi++; phase = 'RES'; phaseUntil = now + 1500; flash = 0.3; flashC = '74,222,128';
+                msg = `ممتاز! ${digital(target.hr, target.m)} ✔`; hold = 0;
+                EDU.fx.burst(cr.x + cr.w / 2, cr.y + cr.h / 2, ['#c084fc', '#fde047', '#4ade80'], 34);
+                [660, 880, 1100].forEach((f, k) => GC.beep(f, 0.12, 'triangle', 0.16, k * 0.08));
+                EDU.speak(phrase(target.hr, target.m));
+            } else if ((now - qStart) / 1000 >= L.limit) {
+                misses++; qi++; phase = 'RES'; phaseUntil = now + 2200; flash = 0.3; flashC = '248,113,113';
+                msg = `انتهى الوقت — الوقت المطلوب ${digital(target.hr, target.m)}`; hold = 0;
+                GC.beep(160, 0.3, 'sawtooth', 0.16, 0, 80);
+            }
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function drawClock(now) {
+            const c = clockCenter(), r = c.r, L = LEVELS[level];
+            // الوجه
+            const g = ctx.createRadialGradient(c.x, c.y - r * 0.2, r * 0.1, c.x, c.y, r * 1.05);
+            g.addColorStop(0, '#fdf4ff'); g.addColorStop(1, '#e9d5ff');
+            ctx.beginPath(); ctx.arc(c.x, c.y, r * 1.06, 0, 7); ctx.fillStyle = '#4c1d95'; ctx.fill();
+            ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, 7); ctx.fillStyle = g; ctx.fill();
+            for (let i = 0; i < 60; i++) {
+                const a = i * 6 * Math.PI / 180, big = i % 5 === 0;
+                ctx.strokeStyle = big ? '#4c1d95' : '#a78bfa'; ctx.lineWidth = big ? 3 : 1.5;
+                ctx.beginPath(); ctx.moveTo(c.x + Math.sin(a) * r * (big ? 0.86 : 0.92), c.y - Math.cos(a) * r * (big ? 0.86 : 0.92)); ctx.lineTo(c.x + Math.sin(a) * r * 0.97, c.y - Math.cos(a) * r * 0.97); ctx.stroke();
+            }
+            for (let i = 1; i <= 12; i++) { const a = i * 30 * Math.PI / 180; EDU.text(ctx, EDU.toAr(i), c.x + Math.sin(a) * r * 0.72, c.y - Math.cos(a) * r * 0.72, r * 0.16, '#3b0764'); }
+            const hand_ = (ang, len, wd, col, dash) => {
+                if (ang === null) return;
+                const a = ang * Math.PI / 180;
+                ctx.strokeStyle = col; ctx.lineWidth = wd; ctx.lineCap = 'round';
+                if (dash) ctx.setLineDash([10, 8]);
+                ctx.beginPath(); ctx.moveTo(c.x - Math.sin(a) * r * 0.08, c.y + Math.cos(a) * r * 0.08); ctx.lineTo(c.x + Math.sin(a) * len * r, c.y - Math.cos(a) * len * r); ctx.stroke();
+                ctx.setLineDash([]);
+            };
+            // العقربان المطلوبان (تلميح) في المستويات الأولى أو بعد انتهاء الوقت
+            if ((L.hint && phase === 'Q') || (phase === 'RES' && !(hold > 0) && msg.startsWith('انتهى'))) {
+                ctx.globalAlpha = 0.5; hand_(target.ah, 0.5, 8, '#16a34a', true); hand_(target.am, 0.82, 5, '#16a34a', true); ctx.globalAlpha = 1;
+            }
+            const okH = hand.h !== null && target && angDiff(hand.h, target.ah) <= L.tol[0];
+            const okM = hand.m !== null && target && angDiff(hand.m, target.am) <= L.tol[1];
+            hand_(hand.h, 0.5, Math.max(8, r * 0.07), okH ? '#16a34a' : '#dc2626');
+            hand_(hand.m, 0.82, Math.max(5, r * 0.045), okM ? '#16a34a' : '#2563eb');
+            ctx.beginPath(); ctx.arc(c.x, c.y, r * 0.05, 0, 7); ctx.fillStyle = '#4c1d95'; ctx.fill();
+            // حلقة التثبيت
+            if (phase === 'Q' && hold > 0) { ctx.beginPath(); ctx.arc(c.x, c.y, r * 1.12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, hold / HOLD)); ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 7; ctx.stroke(); }
+        }
+
+        function draw(now, dt) {
+            GC.begin(ctx);
+            ctx.fillStyle = '#140b24'; ctx.fillRect(0, 0, w, h);
+            const topH = 118;
+            if (portrait) { cr = { x: 0, y: topH, w, h: (h - topH) * 0.56 }; camR = { x: 0, y: topH + (h - topH) * 0.56, w, h: (h - topH) * 0.44 }; }
+            else { cr = { x: 0, y: topH, w: w * 0.52, h: h - topH }; camR = { x: w * 0.52, y: topH, w: w * 0.48, h: h - topH }; }
+            vr = EDU.fitRect(video, camR);
+            if (phase === 'MENU' || !target) { return; }
+            const L = LEVELS[level];
+            // الكاميرا والهيكل (الذراع اليسرى حمراء واليمنى زرقاء)
+            ctx.save(); ctx.beginPath(); ctx.rect(camR.x, camR.y, camR.w, camR.h); ctx.clip();
+            if (cameraOK) EDU.drawVideo(ctx, video, vr, 0.55);
+            if (poseLm && now - lastPoseT < 600) {
+                EDU.drawSkeleton(ctx, poseLm, vr, '#e9d5ff', 4);
+                [[11, 13, 15, '#ef4444'], [12, 14, 16, '#3b82f6']].forEach(([a, b, d, col]) => {
+                    const p = EDU.pt(vr, poseLm[a]), q = EDU.pt(vr, poseLm[b]), s = EDU.pt(vr, poseLm[d]);
+                    ctx.strokeStyle = col; ctx.lineWidth = 9; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.lineTo(s.x, s.y); ctx.stroke();
+                });
+            } else if (cameraOK) EDU.text(ctx, 'قف أمام الكاميرا وارفع ذراعيك', camR.x + camR.w / 2, camR.y + camR.h / 2, 18, '#fca5a5');
+            else EDU.text(ctx, 'اسحب العقربين على الساعة', camR.x + camR.w / 2, camR.y + camR.h / 2, 18, '#e9d5ff');
+            ctx.restore();
+
+            drawClock(now);
+
+            // السؤال
+            ctx.fillStyle = 'rgba(20,11,36,0.85)'; ctx.fillRect(0, 0, w, topH - 6);
+            const fs = Math.max(13, Math.min(w * 0.035, 18));
+            ctx.textBaseline = 'middle'; ctx.font = `700 ${fs}px Tahoma`;
+            ctx.textAlign = 'right'; ctx.fillStyle = '#d8b4fe'; ctx.fillText(`المستوى ${level + 1}: ${L.name}`, w - 12, 20);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#e2e8f0'; ctx.fillText(`السؤال ${Math.min(qi + (phase === 'Q' ? 1 : 0), Q_COUNT)} / ${Q_COUNT}`, w / 2, 20);
+            ctx.textAlign = 'left'; ctx.fillStyle = '#fca5a5'; ctx.fillText(`✖ ${misses}`, 118, 20);
+            EDU.text(ctx, 'اضبط الساعة على:', w / 2, 46, fs * 1.05, '#c4b5fd');
+            ctx.save(); if (target.type === 'digital') ctx.direction = 'ltr';
+            EDU.text(ctx, target.text, w / 2, 80, Math.max(24, Math.min(w * (target.type === 'digital' ? 0.1 : 0.055), 56)), '#fde047', '#7c3aed');
+            ctx.restore();
+            const f = phase === 'Q' ? Math.max(0, 1 - (now - qStart) / 1000 / L.limit) : 0;
+            ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(12, topH - 14, w - 24, 5);
+            ctx.fillStyle = f < 0.3 ? '#f87171' : '#a78bfa'; ctx.fillRect(12, topH - 14, (w - 24) * f, 5);
+            // دليل العقربين
+            EDU.text(ctx, '🔴 ذراعك اليسرى = عقرب الساعات     🔵 ذراعك اليمنى = عقرب الدقائق', w / 2, h - 14, Math.max(11, Math.min(w * 0.028, 15)), '#c4b5fd');
+            if (phase === 'RES') { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, h * 0.5 - 28, w, 56); EDU.text(ctx, msg, w / 2, h * 0.5, Math.max(16, Math.min(w * 0.05, 28)), msg.startsWith('ممتاز') ? '#4ade80' : '#fca5a5'); }
+            if (flash > 0) { ctx.fillStyle = `rgba(${flashC},${Math.min(0.2, flash)})`; ctx.fillRect(0, 0, w, h); }
+            EDU.fx.draw(ctx, dt);
+        }
+
+        function loop(now) {
+            const dt = Math.min((now - lastT) / 1000, 0.05); lastT = now;
+            update(now, dt);
+            draw(now, dt);
+            requestAnimationFrame(loop);
+        }
+
+        const HELP = 'تعلّم قراءة الساعة بجسمك: <b>ذراعك اليسرى عقرب الساعات واليمنى عقرب الدقائق</b>. ارفع ذراعيك لتضبط الوقت المطلوب وثبّتهما ثانية. بدون كاميرا اسحب العقربين على الساعة.';
+        (async function init() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { menu.ready(HELP); return; }
+            try { await EDU.startPose(video, onPose); cameraOK = true; menu.ready(HELP); }
+            catch (e) { console.error(e); menu.ready(HELP + '<br>تعذر تشغيل الكاميرا — اسحب العقربين بإصبعك.'); }
+        })();
+        requestAnimationFrame(loop);
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>
