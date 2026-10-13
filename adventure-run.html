@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>مغامرة فذ</title>
+    <script src="game-common.js"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+            background: #0b1730; color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; -webkit-user-select: none; user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #video { position: fixed; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+        .overlay {
+            position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; text-align: center;
+            background: rgba(8, 18, 40, 0.95); padding: 16px; overflow-y: auto;
+        }
+        .overlay > * { flex-shrink: 0; }
+        h1 { margin: 0 0 8px; font-size: clamp(1.8rem, 7vw, 3rem); color: #fbbf24; text-shadow: 0 0 14px rgba(251, 191, 36, 0.6); }
+        p { margin: 0 0 12px; max-width: 680px; line-height: 1.7; color: #cbd5e1; font-size: clamp(0.92rem, 3.4vw, 1.1rem); }
+        .how { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 0 0 12px; max-width: 760px; }
+        .how span { background: rgba(255,255,255,0.08); border-radius: 12px; padding: 6px 12px; font-size: 0.92rem; }
+        button {
+            font-family: inherit; cursor: pointer; border: 2px solid #fbbf24; color: #fff;
+            background: #b45309; border-radius: 50px; padding: 12px 40px;
+            font-size: clamp(1.1rem, 4.5vw, 1.4rem); box-shadow: 0 0 16px rgba(251, 191, 36, 0.45);
+        }
+        button:active { transform: scale(0.97); }
+        .grp { display: flex; align-items: center; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 0 0 10px; }
+        .grp label { color: #94a3b8; font-size: 0.95rem; min-width: 110px; text-align: end; }
+        .row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+        .opt { padding: 7px 16px; font-size: 1rem; background: #16264a; box-shadow: none; border-color: transparent; border-radius: 14px; }
+        .opt small { display: block; font-size: 0.68rem; opacity: 0.85; }
+        .opt.sel { background: #fbbf24; color: #3a2400; }
+        .hidden { display: none !important; }
+        .loader { border: 5px solid rgba(255,255,255,0.1); border-top-color: #fbbf24; border-radius: 50%; width: 46px; height: 46px; animation: spin 1s linear infinite; margin-bottom: 12px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #startBtn { margin-top: 6px; }
+        @media (max-height: 600px) {
+            h1 { margin-bottom: 2px; } p { margin-bottom: 6px; } .grp { margin-bottom: 4px; } .how { margin-bottom: 6px; }
+            button { padding: 8px 26px; } .opt { padding: 4px 12px; } .grp label { min-width: 0; }
+        }
+    </style>
+</head>
+<body>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+    <div id="overlay" class="overlay">
+        <div id="loader" class="loader"></div>
+        <h1 id="title">🏃 مغامرة فذ</h1>
+        <p id="desc">جاري تحميل نموذج تتبع الجسم...</p>
+        <div class="how hidden" id="how">
+            <span>↔️ مِل أو تحرّك جانباً = ركض</span>
+            <span>☝️ ارفع يدك اليمنى (أو اقفز) = قفز — أطِل الرفع لقفزة أعلى</span>
+            <span>🔥 ارفع يدك اليسرى = كرة نار (بعد التقاط 🔥)</span>
+            <span>🦶 اقفز على الأعداء لتهزمهم · اجمع العملات · اصل إلى العلَم</span>
+        </div>
+        <div class="grp hidden" id="g1"><label>ابدأ من المرحلة</label><div class="row" id="stageRow"></div></div>
+        <div class="grp hidden" id="g2"><label>نمط الجري</label><div class="row" id="runRow"></div></div>
+        <div class="grp hidden" id="g3"><label>حساسية الحركة</label><div class="row" id="sensRow"></div></div>
+        <button id="startBtn" class="hidden">ابدأ المغامرة</button>
+    </div>
+
+    <script>
+        const $ = (id) => document.getElementById(id);
+        const canvas = $('canvas'), ctx = canvas.getContext('2d'), video = $('video');
+        const overlay = $('overlay'), titleEl = $('title'), descEl = $('desc'), loader = $('loader'), howEl = $('how'), startBtn = $('startBtn');
+        const toAr = (n) => String(n).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[d]);
+        const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+        /* ---------------- الثوابت والمراحل ---------------- */
+        const TS = 48, ROWS = 13, GR = 10, DT = 1 / 60;
+        const GRAV = 2300, JUMP = 860, RUN = 300;
+        // اسم، سماء (أعلى، أسفل)، لون سطح الأرض، لون الأرض، لون الطوب، لون التلال، الطول، الفجوة القصوى
+        const LEVELS = [
+            { name: 'المروج', sky: ['#5ec8ff', '#d7f3ff'], top: '#4ade80', fill: '#8b5a2b', brick: '#c2692d', hill: '#6ee7a0', len: 130, gap: 2 },
+            { name: 'الصحراء', sky: ['#fb923c', '#fde68a'], top: '#fcd34d', fill: '#c08a4a', brick: '#a16207', hill: '#f3b562', len: 150, gap: 3 },
+            { name: 'جبال الجليد', sky: ['#7dd3fc', '#f0f9ff'], top: '#e0f2fe', fill: '#7aa7c7', brick: '#5b8db5', hill: '#bfdbfe', len: 170, gap: 3 },
+            { name: 'كهف الأسرار', sky: ['#1e1b4b', '#3b2f6b'], top: '#a78bfa', fill: '#4c3d73', brick: '#6d5aa8', hill: '#33285a', len: 190, gap: 3 },
+            { name: 'قلعة الملك', sky: ['#450a0a', '#9a3412'], top: '#94a3b8', fill: '#475569', brick: '#64748b', hill: '#7c2d12', len: 150, gap: 3 }
+        ];
+        const MAX_LEVEL = LEVELS.length;
+        const SENS = [
+            { name: 'حساس', sub: 'حركة صغيرة تكفي', range: 0.17, lean: 12 },
+            { name: 'عادي', sub: 'مناسب للأغلبية', range: 0.25, lean: 16 },
+            { name: 'واسع', sub: 'حركة كبيرة', range: 0.36, lean: 22 }
+        ];
+        const cfg = { level: 1, sens: 1, auto: 0 };
+        let w = 0, h = 0, lastT = performance.now(), acc = 0, now = 0;
+        let phase = 'MENU';          // MENU, READY, PLAY, DEAD, CLEAR, OVER
+        let lvl = 1, L = LEVELS[0], grid = [], WC = 0, worldW = 0;
+        let player = null, enemies = [], coins = [], items = [], fbs = [], parts = [], pops = [], blocksInfo = {}, bumps = [];
+        let goal = null, checkpoint = null, cpHit = false, arena = null, boss = null, camX = 0, camMin = 0;
+        let lives = 3, score = 0, coinCount = 0, phaseT = 0, banner = '', sub = '', result = null, shake = 0;
+        let poseStatus = 'loading', poses = [];
+        const view = { s: 1, ox: 0, oy: 0, vw: 0 };
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; });
+
+        /* ---------------- توليد المرحلة ---------------- */
+        function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+        function genLevel(n) {
+            lvl = n; L = LEVELS[n - 1];
+            const rng = mulberry32(n * 7919 + 101), R = (a, b) => a + Math.floor(rng() * (b - a + 1));
+            const width = L.len + 60;
+            grid = Array.from({ length: ROWS }, () => new Array(width).fill(0));
+            enemies = []; coins = []; items = []; fbs = []; parts = []; pops = []; blocksInfo = {}; bumps = []; boss = null; arena = null; cpHit = false;
+            const set = (x, y, t) => { if (x >= 0 && x < width && y >= 0 && y < ROWS) grid[y][x] = t; };
+            const ground = (x0, x1) => { for (let x = x0; x < x1; x++) for (let y = GR; y < ROWS; y++) set(x, y, 1); };
+            const coinAt = (tx, ty) => coins.push({ x: tx * TS + TS / 2, y: ty * TS + TS / 2, got: false, ph: rng() * 6 });
+            const d = 0.45 + n * 0.3;                         // الصعوبة
+            const mkEnemy = (type, tx, ty) => enemies.push(newEnemy(type, tx * TS + 4, (ty === undefined ? GR - 1 : ty) * TS));
+            let x = 0; ground(0, 14); x = 14;
+            for (let k = 0; k < 4; k++) coinAt(6 + k, GR - 3);
+            let cpX = -1;
+            while (x < L.len) {
+                if (cpX < 0 && x > L.len / 2) { cpX = x; ground(x, x + 6); x += 6; continue; }
+                const r = rng();
+                if (r < 0.22) {                                // أرض مستوية + أعداء/عملات
+                    const len = R(5, 10); ground(x, x + len);
+                    if (rng() < 0.55 * d) mkEnemy(rng() < 0.28 * d && n > 1 ? 'spiky' : 'slime', x + (len >> 1), GR - 1);
+                    if (rng() < 0.5) for (let c = 0; c < 4; c++) coinAt(x + 1 + c, GR - 2);
+                    x += len;
+                } else if (r < 0.42) {                         // فجوة
+                    const gw = R(2, L.gap); x += gw;
+                    for (let c = 0; c <= gw; c++) coinAt(x - gw + c - (c > 0 ? 0 : 0), GR - 3 - Math.round(Math.sin((c / gw) * Math.PI) * 1.2));
+                    const len = R(4, 7); ground(x, x + len); x += len;
+                } else if (r < 0.55) {                         // درج
+                    const hh = R(2, 3), len0 = 2; let xx = x;
+                    ground(xx, xx + 2); xx += 2;
+                    for (let s = 1; s <= hh; s++) { for (let c = 0; c < len0; c++) for (let yy = GR - s; yy < GR; yy++) set(xx + c, yy, 1); ground(xx, xx + len0); xx += len0; }
+                    ground(xx, xx + 2); for (let yy = GR - hh; yy < GR; yy++) { set(xx, yy, 1); set(xx + 1, yy, 1); } xx += 2;
+                    for (let s = hh - 1; s >= 1; s--) { ground(xx, xx + len0); for (let c = 0; c < len0; c++) for (let yy = GR - s; yy < GR; yy++) set(xx + c, yy, 1); xx += len0; }
+                    ground(xx, xx + 3); xx += 3;
+                    coinAt(x + 2 + hh * 2, GR - hh - 2);
+                    x = xx;
+                } else if (r < 0.72) {                         // كتل معلّقة (أسئلة وطوب)
+                    const len = R(7, 10); ground(x, x + len);
+                    const cnt = R(3, 5), bx = x + 1 + R(0, len - cnt - 2);
+                    for (let c = 0; c < cnt; c++) {
+                        const q = c % 2 === 1 || rng() < 0.2;
+                        set(bx + c, GR - 4, q ? 3 : 2);
+                        if (q) blocksInfo[(GR - 4) + ',' + (bx + c)] = rng() < 0.35 ? 'power' : 'coin';
+                        coinAt(bx + c, GR - 6 + (c % 2));
+                    }
+                    if (rng() < 0.6 * d) mkEnemy('slime', x + len - 2, GR - 1);
+                    x += len;
+                } else if (r < 0.82) {                         // أشواك
+                    ground(x, x + 3); x += 3;
+                    const sl = n >= 3 ? R(1, 2) : 1; ground(x, x + sl); for (let c = 0; c < sl; c++) set(x + c, GR - 1, 5);
+                    for (let c = 0; c < sl; c++) coinAt(x + c, GR - 3);
+                    x += sl; ground(x, x + 4); x += 4;
+                } else if (r < 0.9) {                          // عمود
+                    ground(x, x + 4); x += 4;
+                    const ph = R(2, 3); ground(x, x + 2); for (let yy = GR - ph; yy < GR; yy++) { set(x, yy, 1); set(x + 1, yy, 1); } x += 2;
+                    ground(x, x + 4); x += 4;
+                } else {                                       // وطاويط
+                    const len = R(8, 10); ground(x, x + len);
+                    const nb = Math.min(4, 1 + Math.floor(d * 1.3));
+                    for (let b = 0; b < nb; b++) enemies.push(newEnemy('bat', (x + 2 + b * 2) * TS, (GR - 4 - (b % 2)) * TS));
+                    x += len;
+                }
+            }
+            if (cpX < 0) cpX = Math.floor(L.len / 2);
+            checkpoint = { x: cpX * TS + 12, y: (GR - 2) * TS };
+            // النهاية
+            ground(x, x + 12);
+            if (n < MAX_LEVEL) {
+                goal = { x: (x + 8) * TS, y: (GR - 7) * TS, h: 7 * TS };
+                worldW = (x + 12) * TS;
+            } else {
+                // ساحة الزعيم: أرض مستوية وجدار يُفتح بعد هزيمته
+                const ax = x + 12; ground(ax, ax + 34); arena = { x: ax * TS, wallCol: ax + 24, open: false, started: false };
+                for (let yy = 0; yy < GR; yy++) set(ax + 24, yy, 1);
+                goal = { x: (ax + 30) * TS, y: (GR - 7) * TS, h: 7 * TS, hidden: true };
+                worldW = (ax + 34) * TS;
+            }
+            WC = width;
+        }
+
+        function newEnemy(type, x, y) {
+            const o = { type, x, y, vx: 0, vy: 0, w: 40, h: 34, dir: -1, active: false, dead: 0, t: Math.random() * 6, onGround: false, y0: y };
+            if (type === 'slime') { o.vx = -60; }
+            else if (type === 'spiky') { o.vx = -55; o.w = 42; o.h = 34; }
+            else if (type === 'bat') { o.w = 40; o.h = 28; o.vx = -70; }
+            else if (type === 'boss') { o.w = 140; o.h = 118; o.hp = 3; o.inv = 0; o.hopT = 1.2; o.vx = 0; }
+            return o;
+        }
+
+        /* ---------------- الفيزياء والبلاط ---------------- */
+        function tileAt(tx, ty) { if (tx < 0) return 1; if (ty < 0 || ty >= ROWS) return 0; if (tx >= WC) return 1; return grid[ty][tx]; }
+        const isSolid = (t) => t === 1 || t === 2 || t === 3 || t === 4;
+        function moveBody(b, dt, hitCb) {
+            b.x += b.vx * dt;
+            let l = Math.floor(b.x / TS), r = Math.floor((b.x + b.w - 0.01) / TS), t = Math.floor(b.y / TS), bt = Math.floor((b.y + b.h - 0.01) / TS);
+            b.hitWall = false;
+            for (let ty = t; ty <= bt; ty++) for (let tx = l; tx <= r; tx++) {
+                if (!isSolid(tileAt(tx, ty))) continue;
+                if (b.vx > 0) b.x = tx * TS - b.w; else if (b.vx < 0) b.x = (tx + 1) * TS; else continue;
+                b.hitWall = true; b.vx = 0; l = Math.floor(b.x / TS); r = Math.floor((b.x + b.w - 0.01) / TS);
+            }
+            b.y += b.vy * dt; b.onGround = false;
+            l = Math.floor(b.x / TS); r = Math.floor((b.x + b.w - 0.01) / TS); t = Math.floor(b.y / TS); bt = Math.floor((b.y + b.h - 0.01) / TS);
+            let headTile = null;
+            for (let ty = t; ty <= bt; ty++) for (let tx = l; tx <= r; tx++) {
+                if (!isSolid(tileAt(tx, ty))) continue;
+                if (b.vy > 0) { b.y = ty * TS - b.h; b.onGround = true; b.vy = 0; }
+                else if (b.vy < 0) { b.y = (ty + 1) * TS; b.vy = 0; const cx = b.x + b.w / 2, d = Math.abs(tx * TS + TS / 2 - cx); if (!headTile || d < headTile.d) headTile = { tx, ty, d }; }
+                t = Math.floor(b.y / TS); bt = Math.floor((b.y + b.h - 0.01) / TS);
+            }
+            if (headTile && hitCb) hitCb(headTile.tx, headTile.ty);
+        }
+
+        /* ---------------- اللاعب ---------------- */
+        function mkPlayer() {
+            return {
+                x: 0, y: 0, vx: 0, vy: 0, w: 30, h: 40, dir: 1, onGround: false, state: 0, inv: 0, coy: 0, buf: 0, held: false, wasHeld: false,
+                cur: null, base: null, seenAt: 0, seen: false, u: 0, armJ: true, armF: true, pulse: 0, handUp: false, fireReq: false,
+                run: 0, anim: 0, fireCd: 0, flashJ: 0, flashF: 0, dead: false
+            };
+        }
+        function setState(p, st) {
+            const nh = st > 0 ? 56 : 40;
+            if (nh !== p.h) { p.y -= nh - p.h; p.h = nh; }
+            p.state = st;
+        }
+        function respawn() {
+            const p = player = mkPlayer();
+            p.x = cpHit ? checkpoint.x : 2 * TS; p.y = GR * TS - p.h - 0.1;
+            p.inv = 2; camMin = arena && arena.started ? arena.x : 0;
+            camX = clamp(p.x - view.vw * 0.35, camMin, Math.max(camMin, worldW - view.vw));
+        }
+
+        /* ---------------- تتبع الجسم ---------------- */
+        const VISION_VER = '0.10.14';
+        let landmarker = null, lastVideoT = -1;
+        async function loadVision() {
+            let mod, base;
+            try { mod = await import('./vendor/tasks-vision/vision_bundle.mjs'); base = new URL('./vendor/tasks-vision/wasm', location.href).href; }
+            catch (e) {
+                mod = await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION_VER}/vision_bundle.mjs`);
+                base = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION_VER}/wasm`;
+            }
+            const fs = await mod.FilesetResolver.forVisionTasks(base);
+            const local = './vendor/models/pose_landmarker_lite.task';
+            let modelPath = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+            try { const r = await fetch(local, { method: 'HEAD' }); if (r.ok) modelPath = local; } catch (e) { /* لا يوجد ملف محلي */ }
+            const opts = (delegate) => ({
+                baseOptions: { modelAssetPath: modelPath, delegate }, runningMode: 'VIDEO', numPoses: 1,
+                minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5
+            });
+            try { return await mod.PoseLandmarker.createFromOptions(fs, opts('GPU')); }
+            catch (e) { return await mod.PoseLandmarker.createFromOptions(fs, opts('CPU')); }
+        }
+        async function initPose() {
+            if (new URLSearchParams(location.search).has('sim')) { poseStatus = 'sim'; return readyMenu(); }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { poseStatus = 'failed'; return readyMenu(); }
+            try {
+                landmarker = await loadVision();
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+                video.srcObject = stream;
+                await video.play();
+                poseStatus = 'ok';
+            } catch (e) { console.error(e); poseStatus = 'failed'; }
+            readyMenu();
+        }
+        function leanFrom(lm, vw, vh) {
+            const Ls = lm[11], Rs = lm[12], deg = 180 / Math.PI;
+            const roll = -Math.atan2((Ls.y - Rs.y) * vh, (Ls.x - Rs.x) * vw) * deg;
+            const sx = (Ls.x + Rs.x) / 2, sy = (Ls.y + Rs.y) / 2;
+            const hp = lm[23], hq = lm[24];
+            if (hp && hq && hp.visibility > 0.35 && hq.visibility > 0.35) {
+                const hx = (hp.x + hq.x) / 2, hy = (hp.y + hq.y) / 2;
+                return -Math.atan2((sx - hx) * vw, (hy - sy) * vh) * deg * 0.85 + roll * 0.15;
+            }
+            const n = lm[0], swpx = Math.max(1, Math.abs(Ls.x - Rs.x) * vw);
+            const head = n ? -Math.atan2((n.x - sx) * vw, swpx * 0.9) * deg : 0;
+            return head * 0.6 + roll * 0.4;
+        }
+        let curRaw = null;       // آخر قراءة للجسم (تبقى عبر الموت وإعادة الإحياء)
+        function detect(t) {
+            if (poseStatus !== 'ok' || !landmarker || video.readyState < 2 || video.currentTime === lastVideoT) return;
+            lastVideoT = video.currentTime;
+            let res;
+            try { res = landmarker.detectForVideo(video, t); } catch (e) { return; }
+            const vw = video.videoWidth, vh = video.videoHeight;
+            const list = (res.landmarks || []).filter((lm) => lm[11] && lm[12] && lm[11].visibility > 0.4 && lm[12].visibility > 0.4);
+            if (!list.length) { poses = []; return; }
+            const lm = list.reduce((a, b) => (Math.abs(b[11].x - b[12].x) > Math.abs(a[11].x - a[12].x) ? b : a));
+            poses = [lm];
+            const Ls = lm[11], Rs = lm[12], swpx = Math.max(20, Math.abs(Ls.x - Rs.x) * vw), shy = (Ls.y + Rs.y) / 2;
+            const raw = {
+                lean: leanFrom(lm, vw, vh), cx: 1 - (Ls.x + Rs.x) / 2, sy: shy * vh, swpx,
+                upR: lm[16] && lm[16].visibility > 0.5 ? ((shy - lm[16].y) * vh) / swpx : -9,
+                upL: lm[15] && lm[15].visibility > 0.5 ? ((shy - lm[15].y) * vh) / swpx : -9
+            };
+            if (!curRaw) curRaw = raw;
+            else {
+                curRaw.lean += (raw.lean - curRaw.lean) * 0.5; curRaw.cx += (raw.cx - curRaw.cx) * 0.55;
+                curRaw.sy += (raw.sy - curRaw.sy) * 0.6; curRaw.swpx += (raw.swpx - curRaw.swpx) * 0.3;
+                curRaw.upR = raw.upR; curRaw.upL = raw.upL;
+            }
+            seenRaw = t;
+        }
+        let seenRaw = 0, baseRaw = null;
+
+        /* ---------------- لوحة المفاتيح واللمس (احتياط) ---------------- */
+        const MOVE_L = ['ArrowLeft', 'KeyA'], MOVE_R = ['ArrowRight', 'KeyD'], JUMPK = ['ArrowUp', 'KeyW', 'Space'], FIREK = ['KeyZ', 'KeyF', 'ShiftLeft', 'ShiftRight'];
+        const allKeys = new Set([...MOVE_L, ...MOVE_R, ...JUMPK, ...FIREK]);
+        const keyDown = new Set();
+        window.addEventListener('keydown', (e) => {
+            if (!allKeys.has(e.code) || phase === 'MENU') return;
+            e.preventDefault(); e.stopPropagation();
+            if (!e.repeat) { keyDown.add(e.code); if (FIREK.includes(e.code)) fireKeyPressed = true; }
+        }, true);
+        window.addEventListener('keyup', (e) => { keyDown.delete(e.code); });
+        window.addEventListener('blur', () => { keyDown.clear(); touch.l = touch.r = touch.j = false; });
+        let fireKeyPressed = false;
+        const touch = { l: false, r: false, j: false };
+        window.addEventListener('pointerdown', (e) => {
+            if (phase === 'MENU' || (e.target.closest && e.target.closest('button, .overlay, #remote-back-btn'))) return;
+            const fx = e.clientX / w;
+            if (fx < 0.3) touch.l = true; else if (fx > 0.7) touch.r = true; else touch.j = true;
+        });
+        const clearTouch = () => { touch.l = touch.r = touch.j = false; };
+        window.addEventListener('pointerup', clearTouch);
+        window.addEventListener('pointercancel', clearTouch);
+
+        /* ---------------- تحويل الجسم إلى أوامر ---------------- */
+        function readInput(p, dt) {
+            const sens = SENS[cfg.sens];
+            const kd = (MOVE_R.some((k) => keyDown.has(k)) ? 1 : 0) - (MOVE_L.some((k) => keyDown.has(k)) ? 1 : 0) + (touch.r ? 1 : 0) - (touch.l ? 1 : 0);
+            let jumpHeld = JUMPK.some((k) => keyDown.has(k)) || touch.j, fire = fireKeyPressed;
+            fireKeyPressed = false;
+            let run = clamp(kd, -1, 1);
+            const seen = curRaw && now - seenRaw < 600;
+            p.seen = !!seen;
+            if (seen) {
+                const c = curRaw;
+                if (!baseRaw) baseRaw = { cx: c.cx, lean: c.lean, sy: c.sy, swpx: c.swpx };
+                const b = baseRaw;
+                if (phase === 'READY') { b.cx += (c.cx - b.cx) * 0.1; b.lean += (c.lean - b.lean) * 0.1; b.sy += (c.sy - b.sy) * 0.1; b.swpx += (c.swpx - b.swpx) * 0.1; }
+                const u = clamp((c.cx - b.cx) / sens.range + ((c.lean - b.lean) / sens.lean) * 0.5, -1, 1);
+                p.u = u;
+                if (!kd) {
+                    if (cfg.auto) run = clamp(0.72 + u * 0.8, 0, 1);
+                    else run = Math.abs(u) < 0.14 ? 0 : Math.sign(u) * (Math.abs(u) - 0.14) / 0.86;
+                }
+                if (phase === 'PLAY') {
+                    const dy = (c.sy - b.sy) / b.swpx;
+                    if (!p.handUp && c.upR > 0.55) p.handUp = true; else if (p.handUp && c.upR < 0.25) p.handUp = false;
+                    if (p.handUp) jumpHeld = true;
+                    if (p.armJ && dy < -0.42) { p.armJ = false; p.pulse = 0.28; } else if (!p.armJ && dy > -0.15) p.armJ = true;
+                    if (p.pulse > 0) { jumpHeld = true; p.pulse -= dt; }
+                    if (p.armF && c.upL > 0.55) { p.armF = false; fire = true; } else if (!p.armF && c.upL < 0.15) p.armF = true;
+                    if (Math.abs(u) < 0.14 && Math.abs(dy) < 0.25) { b.cx += (c.cx - b.cx) * 0.004; b.sy += (c.sy - b.sy) * 0.01; }
+                }
+            }
+            if (cfg.auto && !seen && !kd) run = 0;
+            p.run = run;
+            p.fireReq = fire;
+            p.held = jumpHeld;
+        }
+
+        /* ---------------- تحديث اللعبة ---------------- */
+        function sfx(f, d, ty, v, sl) { GC.beep(f, d, ty || 'square', v || 0.06, 0, sl); }
+        function pop(x, y, txt, c) { pops.push({ x, y, txt, c: c || '#fde047', t: 0.9 }); }
+        function burst(x, y, c, n) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.283, s = 60 + Math.random() * 220; parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 120, t: 0.4 + Math.random() * 0.5, c }); } }
+
+        function hitBlock(tx, ty) {
+            const t = grid[ty][tx], p = player;
+            if (t === 3) {
+                grid[ty][tx] = 4; bumps.push({ tx, ty, t: 0.2 });
+                const what = blocksInfo[ty + ',' + tx] || 'coin';
+                if (what === 'power') items.push({ type: p.state === 0 ? 'big' : 'fire', x: tx * TS + 6, y: ty * TS - 6, vx: 0, vy: -380, w: 36, h: 36, rise: 0.35, dir: 1 });
+                else { coinCount++; score += 100; pop(tx * TS + TS / 2, ty * TS - 8, '+١٠٠'); sfx(1200, 0.12, 'triangle', 0.1, 1800); checkLife(); }
+            } else if (t === 2) {
+                if (p.state > 0) { grid[ty][tx] = 0; burst(tx * TS + TS / 2, ty * TS + TS / 2, L.brick, 12); sfx(160, 0.15, 'sawtooth', 0.08, 80); score += 50; }
+                else { bumps.push({ tx, ty, t: 0.15 }); sfx(200, 0.06, 'square', 0.06); }
+            } else if (t === 4) { bumps.push({ tx, ty, t: 0.1 }); }
+            // الأعداء فوق الكتلة
+            enemies.forEach((e) => { if (!e.dead && e.onGround && Math.abs(e.x + e.w / 2 - (tx * TS + TS / 2)) < TS && Math.abs(e.y + e.h - ty * TS) < 6) { e.dead = 1; e.fall = true; e.vy = -420; } });
+        }
+        function checkLife() { if (coinCount >= 100) { coinCount -= 100; lives++; pop(player.x, player.y - 30, '❤ حياة إضافية!', '#fb7185'); sfx(900, 0.4, 'triangle', 0.12, 1800); } }
+
+        function hurtPlayer() {
+            const p = player;
+            if (p.inv > 0 || p.dead) return;
+            if (p.state > 0) { setState(p, 0); p.inv = 1.6; sfx(260, 0.25, 'sawtooth', 0.12, 90); shake = 0.2; }
+            else killPlayer();
+        }
+        function killPlayer() {
+            const p = player; if (p.dead) return;
+            p.dead = true; p.vy = -700; p.vx = 0; shake = 0.3;
+            sfx(500, 0.5, 'sawtooth', 0.14, 120);
+            phase = 'DEAD'; phaseT = 120;
+        }
+
+        function updatePlayer(dt) {
+            const p = player;
+            readInput(p, dt);
+            if (p.inv > 0) p.inv -= dt;
+            p.fireCd -= dt;
+            const prevHeld = p.wasHeld; p.wasHeld = p.held;
+            if (p.held && !prevHeld) { p.buf = 0.13; p.flashJ = now; }
+            else p.buf -= dt;
+            p.coy = p.onGround ? 0.1 : p.coy - dt;
+            if (p.buf > 0 && p.coy > 0) { p.vy = -JUMP; p.buf = 0; p.coy = 0; p.onGround = false; sfx(420, 0.15, 'square', 0.07, 760); }
+            const tgt = p.run * RUN;
+            const acc = p.onGround ? (Math.abs(tgt) > Math.abs(p.vx) ? 2000 : 2600) : 1100;
+            p.vx += clamp(tgt - p.vx, -acc * dt, acc * dt);
+            if (Math.abs(p.run) > 0.05) p.dir = Math.sign(p.run);
+            let g = GRAV; if (p.vy < 0 && !p.held) g *= 2.4; if (p.vy > 700) g *= 0.9;
+            p.vy = Math.min(p.vy + g * dt, 1050);
+            moveBody(p, dt, hitBlock);
+            if (p.x < camMin) { p.x = camMin; p.vx = Math.max(0, p.vx); }
+            p.anim += Math.abs(p.vx) * dt * 0.05;
+            // كرة النار
+            if (p.fireReq && p.state === 2 && p.fireCd <= 0 && fbs.length < 3) {
+                fbs.push({ x: p.x + p.w / 2 + p.dir * 16, y: p.y + p.h * 0.45, vx: p.dir * 460, vy: 0, t: 2 }); p.fireCd = 0.28; p.flashF = now; sfx(700, 0.12, 'square', 0.06, 300);
+            } else if (p.fireReq && p.state !== 2) p.flashF = now;
+            // السقوط في الحفرة
+            if (p.y > (ROWS + 1) * TS) killPlayer();
+            // الأشواك
+            const l = Math.floor((p.x + 4) / TS), r = Math.floor((p.x + p.w - 4) / TS), by = Math.floor((p.y + p.h - 6) / TS);
+            for (let tx = l; tx <= r; tx++) if (tileAt(tx, by) === 5 && p.y + p.h > by * TS + 28) hurtPlayer();
+            // العملات
+            coins.forEach((c) => { if (!c.got && Math.abs(c.x - (p.x + p.w / 2)) < 26 && Math.abs(c.y - (p.y + p.h / 2)) < p.h / 2 + 12) { c.got = true; coinCount++; score += 100; sfx(1100 + Math.random() * 300, 0.1, 'triangle', 0.08, 1700); checkLife(); } });
+            // نقطة التفتيش
+            if (!cpHit && p.x > checkpoint.x) { cpHit = true; pop(p.x, p.y - 40, '🚩 نقطة حفظ', '#4ade80'); sfx(660, 0.2, 'triangle', 0.1, 990); }
+            // العلَم
+            if (goal && !goal.hidden && p.x + p.w > goal.x - 4) levelClear();
+            // ساحة الزعيم
+            if (arena && !arena.started && p.x > arena.x + 3 * TS) {
+                arena.started = true; camMin = arena.x;
+                boss = newEnemy('boss', (arena.wallCol - 8) * TS, (GR - 3) * TS); boss.active = true; enemies.push(boss);
+                banner = 'الملك الأخضر!'; sub = 'اقفز على رأسه ٣ مرات'; bannerT = 2.2; sfx(120, 0.7, 'sawtooth', 0.14, 70);
+            }
+        }
+        let bannerT = 0;
+
+        function levelClear() {
+            if (phase !== 'PLAY') return;
+            const bonus = 1000 + lives * 500; score += bonus;
+            GC.store.set('mar_level', Math.max(GC.store.get('mar_level'), lvl + 1));
+            banner = `🏁 أنهيت المرحلة ${toAr(lvl)}!`; sub = `مكافأة: ${toAr(bonus)} نقطة`;
+            phase = 'CLEAR'; phaseT = 220; sfx(660, 0.2, 'triangle', 0.14, 990); GC.beep(990, 0.2, 'triangle', 0.14, 0.2); GC.beep(1320, 0.4, 'triangle', 0.14, 0.4);
+        }
+
+        function updateEnemy(e, dt) {
+            const p = player;
+            if (e.dead) {
+                if (e.fall) { e.vy += GRAV * dt; e.y += e.vy * dt; e.x += (e.vx || 0) * dt; e.dead += dt; return; }
+                e.dead += dt; return;
+            }
+            if (!e.active) { if (e.x < camX + view.vw + 80) e.active = true; else return; }
+            e.t += dt;
+            if (e.type === 'bat') { e.x += e.vx * dt; e.y = e.y0 + Math.sin(e.t * 3) * 36; if (e.x < camX - 200) e.dead = 9; return; }
+            if (e.type === 'boss') {
+                e.inv = Math.max(0, e.inv - dt);
+                e.vy += GRAV * dt;
+                if (e.onGround) {
+                    e.vx = 0; e.hopT -= dt;
+                    if (e.hopT <= 0) { const sp = 1 + (3 - e.hp) * 0.25; e.vy = -980; e.vx = Math.sign(p.x - e.x) * 250 * sp; e.hopT = 1.3 / sp; sfx(150, 0.2, 'sawtooth', 0.1, 80); }
+                }
+                const was = e.onGround; moveBody(e, dt);
+                if (e.onGround && !was) { shake = 0.25; sfx(90, 0.25, 'sawtooth', 0.12, 40); }
+                if (e.hitWall) e.vx = 0;
+                return;
+            }
+            // سلايم وقنفذ: يمشيان ويلتفتان عند الجدار أو الحافة
+            e.vy = Math.min(e.vy + GRAV * dt, 900);
+            const speed = e.type === 'spiky' ? 55 : 60;
+            e.vx = e.dir * speed;
+            const ahead = e.dir > 0 ? e.x + e.w + 4 : e.x - 4, below = Math.floor((e.y + e.h + 6) / TS);
+            if (e.onGround && !isSolid(tileAt(Math.floor(ahead / TS), below))) e.dir *= -1;
+            moveBody(e, dt);
+            if (e.hitWall) e.dir *= -1;
+            if (e.y > (ROWS + 2) * TS) e.dead = 9;
+        }
+
+        function tick(t) {
+            now = t;
+            parts.forEach((q) => { q.x += q.vx * DT; q.y += q.vy * DT; q.vy += 700 * DT; q.t -= DT; }); parts = parts.filter((q) => q.t > 0);
+            pops.forEach((q) => { q.t -= DT; q.y -= 40 * DT; }); pops = pops.filter((q) => q.t > 0);
+            bumps.forEach((b) => { b.t -= DT; }); bumps = bumps.filter((b) => b.t > 0);
+            shake = Math.max(0, shake - DT); bannerT = Math.max(0, bannerT - DT);
+            if (phase === 'READY') { readInput(player, DT); if (phaseT % 60 === 0 && phaseT > 0) sfx(440, 0.1, 'square', 0.1); if (--phaseT <= 0) { phase = 'PLAY'; sfx(880, 0.3, 'square', 0.14); } updateCamera(); return; }
+            if (phase === 'CLEAR') { if (--phaseT <= 0) { if (lvl >= MAX_LEVEL) endGame(true); else startLevel(lvl + 1); } return; }
+            if (phase === 'OVER') { if (--phaseT <= 0) endToMenu(); return; }
+            if (phase === 'DEAD') {
+                const p = player; p.vy += GRAV * DT; p.y += p.vy * DT;
+                if (--phaseT <= 0) { lives--; if (lives <= 0) endGame(false); else { respawn(); phase = 'PLAY'; } }
+                updateCamera(); return;
+            }
+            if (phase !== 'PLAY') return;
+            updatePlayer(DT);
+            if (phase !== 'PLAY') return;
+            const p = player;
+            // الأعداء
+            enemies.forEach((e) => updateEnemy(e, DT));
+            enemies = enemies.filter((e) => !(e.dead && e.dead > (e.fall ? 2 : 0.5)));
+            enemies.forEach((e) => {
+                if (e.dead || !e.active || p.dead) return;
+                if (p.x < e.x + e.w - 3 && p.x + p.w > e.x + 3 && p.y < e.y + e.h && p.y + p.h > e.y) {
+                    const stomp = p.vy > 60 && p.y + p.h - e.y < (e.type === 'boss' ? 46 : 26) + p.vy * DT * 2 && e.type !== 'spiky';
+                    if (stomp) {
+                        if (e.type === 'boss') {
+                            if (e.inv > 0) return;
+                            e.hp--; e.inv = 1.1; p.vy = -820; sfx(120, 0.3, 'sawtooth', 0.14, 60); burst(e.x + e.w / 2, e.y, '#4ade80', 20); shake = 0.4;
+                            if (e.hp <= 0) { bossDie(e); }
+                        } else {
+                            e.dead = 1; p.vy = p.held ? -780 : -520; score += 200; pop(e.x + e.w / 2, e.y, '+٢٠٠'); sfx(300, 0.12, 'square', 0.08, 120); burst(e.x + e.w / 2, e.y + e.h, '#fff', 6);
+                        }
+                    } else hurtPlayer();
+                }
+            });
+            // الأشياء المساعدة
+            items.forEach((it) => {
+                if (it.rise > 0) { it.rise -= DT; it.y += it.vy * DT; it.vy += 600 * DT; if (it.rise <= 0) it.vy = 0; }
+                else if (it.type === 'big') { it.vy = Math.min(it.vy + GRAV * 0.6 * DT, 700); it.vx = it.dir * 90; moveBody(it, DT); if (it.hitWall) it.dir *= -1; }
+                if (Math.abs(it.x + it.w / 2 - (p.x + p.w / 2)) < 30 && Math.abs(it.y + it.h / 2 - (p.y + p.h / 2)) < 36) {
+                    it.got = true; score += 500;
+                    if (it.type === 'big') { if (p.state < 1) setState(p, 1); pop(p.x, p.y - 20, 'أقوى!', '#fbbf24'); } else { setState(p, 2); pop(p.x, p.y - 20, '🔥 كرات نار!', '#fb923c'); }
+                    sfx(500, 0.1, 'triangle', 0.12, 1000); GC.beep(1000, 0.2, 'triangle', 0.1, 0.1, 1500);
+                }
+            });
+            items = items.filter((it) => !it.got && it.y < (ROWS + 1) * TS);
+            // كرات النار
+            fbs.forEach((f) => {
+                f.t -= DT; f.vy += 1500 * DT; f.x += f.vx * DT; f.y += f.vy * DT;
+                const tx = Math.floor(f.x / TS), ty = Math.floor((f.y + 6) / TS);
+                if (isSolid(tileAt(tx, ty)) && f.vy > 0) { f.y = ty * TS - 6; f.vy = -420; }
+                else if (isSolid(tileAt(Math.floor((f.x + Math.sign(f.vx) * 8) / TS), Math.floor(f.y / TS)))) f.t = 0;
+                enemies.forEach((e) => {
+                    if (e.dead || !e.active) return;
+                    if (f.x > e.x && f.x < e.x + e.w && f.y > e.y && f.y < e.y + e.h) {
+                        f.t = 0;
+                        if (e.type === 'boss') { if (e.inv <= 0) { e.inv = 0.25; e.hp -= 0.34; burst(f.x, f.y, '#fb923c', 6); if (e.hp <= 0.01) bossDie(e); } }
+                        else { e.dead = 1; e.fall = true; e.vy = -300; score += 150; pop(e.x, e.y, '+١٥٠', '#fb923c'); burst(e.x + e.w / 2, e.y + e.h / 2, '#fb923c', 10); sfx(250, 0.1, 'sawtooth', 0.07, 90); }
+                    }
+                });
+            });
+            fbs = fbs.filter((f) => f.t > 0 && Math.abs(f.x - p.x) < 900 && f.y < (ROWS + 1) * TS);
+            updateCamera();
+        }
+        function bossDie(e) {
+            e.dead = 1; e.fall = true; e.vy = -500; e.vx = 0; score += 2000; boom(e);
+            if (arena) { arena.open = true; for (let yy = 0; yy < GR; yy++) grid[yy][arena.wallCol] = 0; goal.hidden = false; camMin = arena.x; }
+            banner = 'هزمت الملك الأخضر!'; sub = 'اركض إلى العلَم'; bannerT = 3; sfx(660, 0.4, 'triangle', 0.14, 1320);
+        }
+        function boom(e) { burst(e.x + e.w / 2, e.y + e.h / 2, '#4ade80', 50); burst(e.x + e.w / 2, e.y + e.h / 2, '#fde047', 30); shake = 0.6; }
+
+        function updateCamera() {
+            const p = player, target = p.x - view.vw * 0.38;
+            const maxX = Math.max(camMin, worldW - view.vw);
+            camX += (clamp(target, camMin, maxX) - camX) * 0.15;
+            camX = clamp(camX, camMin, maxX);
+        }
+
+        /* ---------------- سير اللعبة ---------------- */
+        function startGame() {
+            GC.audioInit();
+            lives = 3; score = 0; coinCount = 0; baseRaw = null;
+            overlay.classList.add('hidden');
+            startLevel(cfg.level);
+        }
+        function startLevel(n) {
+            genLevel(n);
+            if (!view.vw) layoutView();
+            cpHit = false; camMin = 0;
+            player = mkPlayer(); player.x = 2 * TS; player.y = GR * TS - player.h - 0.1; player.inv = 0;
+            camX = 0; baseRaw = null;
+            phase = 'READY'; phaseT = 170; banner = ''; bannerT = 0;
+        }
+        function endGame(won) { result = { won }; phase = 'OVER'; phaseT = 200; sfx(won ? 880 : 150, 0.6, won ? 'triangle' : 'sawtooth', 0.14, won ? 1200 : 50); }
+
+        /* ---------------- القائمة ---------------- */
+        function buildRow(el, items, cur, onPick) {
+            el.innerHTML = '';
+            items.forEach((it, i) => {
+                const b = document.createElement('button');
+                b.className = 'opt' + (i === cur ? ' sel' : '');
+                b.innerHTML = it.sub ? `${it.label}<small>${it.sub}</small>` : it.label;
+                b.addEventListener('click', () => { onPick(i); renderRows(); });
+                el.appendChild(b);
+            });
+        }
+        function renderRows() {
+            const reach = Math.max(1, Math.min(MAX_LEVEL, GC.store.get('mar_level') || 1));
+            const lv = []; for (let i = 1; i <= reach; i++) lv.push(i);
+            if (!lv.includes(cfg.level)) cfg.level = 1;
+            buildRow($('stageRow'), lv.map((s) => ({ label: toAr(s), sub: LEVELS[s - 1].name })), lv.indexOf(cfg.level), (i) => { cfg.level = lv[i]; });
+            buildRow($('runRow'), [{ label: '🕹️ يدوي', sub: 'أنا أتحكم بالركض' }, { label: '🏃 تلقائي', sub: 'يركض وحده — مِل يساراً ليبطئ' }], cfg.auto, (i) => { cfg.auto = i; });
+            buildRow($('sensRow'), SENS.map((s) => ({ label: s.name, sub: s.sub })), cfg.sens, (i) => { cfg.sens = i; });
+        }
+        function readyMenu(keepText) {
+            loader.classList.add('hidden'); howEl.classList.remove('hidden');
+            ['g1', 'g2', 'g3', 'startBtn'].forEach((id) => $(id).classList.remove('hidden'));
+            if (!keepText) {
+                titleEl.textContent = '🏃 مغامرة فذ';
+                descEl.innerHTML = poseStatus === 'ok' || poseStatus === 'sim'
+                    ? 'اركض واقفز عبر <b>٥ مراحل</b> حتى تصل إلى علَم النهاية، واهزم الملك الأخضر في الأخيرة! <b>قف وحدك أمام الكاميرا على بعد نحو مترين</b> بحيث يظهر جسمك من الرأس إلى الورك على الأقل.'
+                    : 'تعذّر تشغيل الكاميرا أو تتبع الجسم. المفاتيح: ← → أو A D للحركة · ↑ أو W أو مسافة للقفز · Z للنار — أو المس يمين/يسار/وسط الشاشة.';
+            }
+            renderRows(); overlay.classList.remove('hidden');
+        }
+        startBtn.addEventListener('click', startGame);
+        function endToMenu() {
+            phase = 'MENU';
+            const best = GC.store.get('mar_best');
+            if (score > best) GC.store.set('mar_best', score);
+            titleEl.textContent = result.won ? '🏆 أنهيت المغامرة!' : `🏃 انتهت اللعبة عند المرحلة ${toAr(lvl)}`;
+            descEl.textContent = `النقاط: ${toAr(score)}${score > best ? ' — 🏆 رقم قياسي جديد!' : ' — الأفضل: ' + toAr(Math.max(best, score))}`;
+            startBtn.textContent = 'العب مجدداً';
+            readyMenu(true);
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function txt(s, x, y, size, color, glow, align) {
+            ctx.textAlign = align || 'center'; ctx.textBaseline = 'middle';
+            ctx.font = `bold ${size}px Tahoma, sans-serif`;
+            if (glow) { ctx.shadowColor = glow; ctx.shadowBlur = size * 0.35; }
+            ctx.fillStyle = color; ctx.fillText(s, x, y); ctx.shadowBlur = 0;
+        }
+        function rrect(x, y, rw, rh, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, rw, rh, r) : ctx.rect(x, y, rw, rh); }
+        function layoutView() {
+            const wh = ROWS * TS;
+            view.s = Math.min(h / wh, w / (9 * TS));
+            view.vw = w / view.s;
+            view.oy = Math.max(0, h - wh * view.s);   // في الشاشات الطولية: السماء تمتد للأعلى
+        }
+
+        function drawTile(t, x, y, ty) {
+            if (t === 1) {
+                const air = ty > 0 && grid[ty - 1] && !isSolid(grid[ty - 1][Math.floor(x / TS)]);
+                ctx.fillStyle = L.fill; ctx.fillRect(x, y, TS + 1, TS + 1);
+                ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.fillRect(x, y + TS - 3, TS, 3);
+                if (air) { ctx.fillStyle = L.top; ctx.fillRect(x, y, TS + 1, 12); ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fillRect(x, y, TS + 1, 3); }
+                else { ctx.fillStyle = 'rgba(0,0,0,0.1)'; ctx.fillRect(x + 8, y + 12, 8, 6); ctx.fillRect(x + 28, y + 28, 10, 6); }
+            } else if (t === 2) {
+                ctx.fillStyle = L.brick; ctx.fillRect(x, y, TS, TS);
+                ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, TS - 2, TS - 2);
+                ctx.beginPath(); ctx.moveTo(x, y + TS / 2); ctx.lineTo(x + TS, y + TS / 2); ctx.moveTo(x + TS / 2, y); ctx.lineTo(x + TS / 2, y + TS / 2); ctx.moveTo(x + TS / 4, y + TS / 2); ctx.lineTo(x + TS / 4, y + TS); ctx.moveTo(x + TS * 0.75, y + TS / 2); ctx.lineTo(x + TS * 0.75, y + TS); ctx.stroke();
+                ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fillRect(x + 2, y + 2, TS - 4, 3);
+            } else if (t === 3) {
+                const pulse = 0.75 + 0.25 * Math.sin(now / 200);
+                ctx.fillStyle = `rgba(251,191,36,${pulse})`; ctx.fillRect(x, y, TS, TS);
+                ctx.strokeStyle = '#b45309'; ctx.lineWidth = 3; ctx.strokeRect(x + 1.5, y + 1.5, TS - 3, TS - 3);
+                txt('؟', x + TS / 2, y + TS / 2 + 2, TS * 0.62, '#7c2d12');
+            } else if (t === 4) {
+                ctx.fillStyle = '#78716c'; ctx.fillRect(x, y, TS, TS); ctx.strokeStyle = '#57534e'; ctx.lineWidth = 3; ctx.strokeRect(x + 1.5, y + 1.5, TS - 3, TS - 3);
+            } else if (t === 5) {
+                ctx.fillStyle = '#cbd5e1'; for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(x + i * 16, y + TS); ctx.lineTo(x + i * 16 + 8, y + 18); ctx.lineTo(x + i * 16 + 16, y + TS); ctx.fill(); }
+                ctx.strokeStyle = '#64748b'; ctx.lineWidth = 1.5; for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(x + i * 16, y + TS); ctx.lineTo(x + i * 16 + 8, y + 18); ctx.lineTo(x + i * 16 + 16, y + TS); ctx.stroke(); }
+            }
+        }
+
+        function drawBackground() {
+            const g = ctx.createLinearGradient(0, 0, 0, h);
+            g.addColorStop(0, L.sky[0]); g.addColorStop(1, L.sky[1]);
+            ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+            const s = view.s, base = view.oy + GR * TS * s;
+            if (lvl === 4 || lvl === 5) { ctx.fillStyle = 'rgba(255,255,255,0.6)'; for (let i = 0; i < 50; i++) { const x = ((i * 137.7 - camX * 0.05 * s) % w + w) % w, y = ((i * 71.3) % (h * 0.6)); ctx.fillRect(x, y, 2, 2); } }
+            // تلال بعيدة
+            ctx.fillStyle = L.hill;
+            ctx.beginPath(); ctx.moveTo(0, base);
+            for (let x = 0; x <= w; x += 20) { const wx = x / s + camX * 0.3; ctx.lineTo(x, base - (60 + Math.sin(wx / 160) * 38 + Math.sin(wx / 71) * 16) * s); }
+            ctx.lineTo(w, base); ctx.fill();
+            // غيوم
+            if (lvl <= 3) { ctx.fillStyle = 'rgba(255,255,255,0.75)'; for (let i = 0; i < 7; i++) { const cx = (((i * 420 - camX * 0.12) % (w / s + 300)) + (w / s + 300)) % (w / s + 300) - 100; const cy = view.oy + (50 + (i * 53) % 120) * s; ctx.beginPath(); ctx.ellipse(cx * s, cy, 48 * s, 18 * s, 0, 0, 7); ctx.ellipse((cx + 30) * s, cy - 8 * s, 34 * s, 16 * s, 0, 0, 7); ctx.fill(); } }
+            if (lvl === 5) { const lg = ctx.createLinearGradient(0, h * 0.85, 0, h); lg.addColorStop(0, 'rgba(251,146,60,0)'); lg.addColorStop(1, 'rgba(251,146,60,0.55)'); ctx.fillStyle = lg; ctx.fillRect(0, h * 0.85, w, h * 0.15); }
+        }
+
+        function drawHero(p) {
+            ctx.save();
+            const cx = p.x + p.w / 2, by = p.y + p.h;
+            ctx.translate(cx, by); ctx.scale(p.dir, 1);
+            if (p.inv > 0 && Math.floor(now / 70) % 2) ctx.globalAlpha = 0.35;
+            const big = p.state > 0, k = big ? 1.15 : 1, run = p.onGround ? Math.sin(p.anim) : 0.7;
+            const body = p.state === 2 ? '#f97316' : '#2563eb';
+            ctx.scale(k, k);
+            const hh = p.h / k;
+            // الأرجل
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(-9 + run * 6, -10, 9, 10); ctx.fillRect(2 - run * 6, -10, 9, 10);
+            // الجسم
+            ctx.fillStyle = body; rrect(-13, -hh * 0.55, 26, hh * 0.45, 8); ctx.fill();
+            ctx.fillStyle = '#fbbf24'; ctx.fillRect(-13, -hh * 0.4, 26, 5);
+            // الذراع
+            ctx.strokeStyle = body; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(8, -hh * 0.5); ctx.lineTo(14 + (p.onGround ? 0 : 4), -hh * 0.4 + (p.onGround ? run * 5 : -8)); ctx.stroke();
+            // الرأس
+            ctx.fillStyle = '#fde4c4'; ctx.beginPath(); ctx.arc(0, -hh + 15, 15, 0, 7); ctx.fill();
+            ctx.fillStyle = '#f59e0b'; ctx.beginPath(); ctx.arc(0, -hh + 11, 15, Math.PI, 0); ctx.fill(); ctx.fillRect(2, -hh + 9, 20, 5);
+            ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.arc(6, -hh + 16, 2.6, 0, 7); ctx.fill();
+            ctx.fillStyle = '#f59e0b'; ctx.font = 'bold 10px Tahoma'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText('ف', -3, -hh + 9);
+            ctx.restore();
+        }
+
+        function drawEnemy(e) {
+            if (e.dead && !e.fall && e.dead > 0.45) return;
+            ctx.save(); ctx.translate(e.x + e.w / 2, e.y + e.h);
+            if (e.fall) { ctx.rotate(e.dead * 6); ctx.translate(0, -e.h / 2); }
+            else if (e.dead) ctx.scale(1.2, 0.3);
+            if (e.type === 'slime') {
+                const sq = 1 + Math.sin(e.t * 8) * 0.06;
+                ctx.fillStyle = '#84cc16'; ctx.beginPath(); ctx.ellipse(0, -15, 20 * sq, 16 / sq, 0, Math.PI, 0); ctx.fillRect(-20 * sq, -15, 40 * sq, 15); ctx.fill();
+                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-7, -20, 5, 0, 7); ctx.arc(7, -20, 5, 0, 7); ctx.fill();
+                ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.arc(-6 + e.dir * 1.5, -20, 2.4, 0, 7); ctx.arc(8 + e.dir * 1.5, -20, 2.4, 0, 7); ctx.fill();
+            } else if (e.type === 'spiky') {
+                ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.ellipse(0, -15, 21, 15, 0, 0, 7); ctx.fill();
+                ctx.fillStyle = '#fca5a5'; for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(i * 8 - 5, -24); ctx.lineTo(i * 8, -38 + Math.abs(i) * 3); ctx.lineTo(i * 8 + 5, -24); ctx.fill(); }
+                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(e.dir * 10, -16, 4, 0, 7); ctx.fill(); ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.arc(e.dir * 11, -16, 2, 0, 7); ctx.fill();
+            } else if (e.type === 'bat') {
+                const f = Math.sin(e.t * 14) * 10;
+                ctx.translate(0, -14); ctx.fillStyle = '#6d28d9';
+                ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(-24, -14 - f, -34, 4); ctx.quadraticCurveTo(-20, 2, 0, 8); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(24, -14 - f, 34, 4); ctx.quadraticCurveTo(20, 2, 0, 8); ctx.fill();
+                ctx.fillStyle = '#7c3aed'; ctx.beginPath(); ctx.ellipse(0, 2, 11, 12, 0, 0, 7); ctx.fill();
+                ctx.fillStyle = '#fde047'; ctx.beginPath(); ctx.arc(-4, 0, 2.6, 0, 7); ctx.arc(4, 0, 2.6, 0, 7); ctx.fill();
+            } else if (e.type === 'boss') {
+                const bl = e.inv > 0 && Math.floor(now / 60) % 2;
+                ctx.fillStyle = bl ? '#fff' : '#16a34a'; ctx.beginPath(); ctx.ellipse(0, -58, 70, 58, 0, Math.PI, 0); ctx.fillRect(-70, -58, 140, 58); ctx.fill();
+                ctx.fillStyle = bl ? '#fff' : '#15803d'; ctx.beginPath(); ctx.ellipse(0, -8, 70, 10, 0, 0, 7); ctx.fill();
+                // التاج
+                ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.moveTo(-34, -108); ctx.lineTo(-34, -132); ctx.lineTo(-17, -118); ctx.lineTo(0, -138); ctx.lineTo(17, -118); ctx.lineTo(34, -132); ctx.lineTo(34, -108); ctx.fill();
+                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-22, -72, 14, 0, 7); ctx.arc(22, -72, 14, 0, 7); ctx.fill();
+                ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.arc(-22 + Math.sign(player.x - e.x) * 4, -70, 6, 0, 7); ctx.arc(22 + Math.sign(player.x - e.x) * 4, -70, 6, 0, 7); ctx.fill();
+                ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-36, -92); ctx.lineTo(-10, -84); ctx.moveTo(36, -92); ctx.lineTo(10, -84); ctx.stroke();
+                ctx.beginPath(); ctx.arc(0, -34, 14, 0.2, Math.PI - 0.2, true); ctx.stroke();
+            }
+            ctx.restore();
+            if (e.type === 'boss' && !e.dead) { // شريط الحياة
+                const bw = 160; ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(e.x + e.w / 2 - bw / 2, e.y - 40, bw, 10); ctx.fillStyle = '#ef4444'; ctx.fillRect(e.x + e.w / 2 - bw / 2, e.y - 40, bw * clamp(e.hp / 3, 0, 1), 10);
+            }
+        }
+
+        function drawWorld() {
+            const c0 = Math.max(0, Math.floor(camX / TS) - 1), c1 = Math.min(WC - 1, Math.ceil((camX + view.vw) / TS) + 1);
+            // الحفر في القلعة: لافا
+            if (lvl === 5) { ctx.fillStyle = '#f97316'; ctx.fillRect(camX - 10, (ROWS - 1) * TS + 20 + Math.sin(now / 300) * 4, view.vw + 20, TS * 3); }
+            else if (lvl === 4) { ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(camX - 10, ROWS * TS - 10, view.vw + 20, TS); }
+            for (let ty = 0; ty < ROWS; ty++) for (let tx = c0; tx <= c1; tx++) {
+                const t = grid[ty][tx]; if (!t) continue;
+                const bump = bumps.find((b) => b.tx === tx && b.ty === ty);
+                drawTile(t, tx * TS, ty * TS - (bump ? Math.sin((bump.t / 0.2) * Math.PI) * 10 : 0), ty);
+            }
+            // العلَم ونقطة الحفظ
+            if (!goal.hidden) {
+                ctx.fillStyle = '#e2e8f0'; ctx.fillRect(goal.x, goal.y, 6, goal.h); ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(goal.x + 3, goal.y - 4, 8, 0, 7); ctx.fill();
+                ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.moveTo(goal.x + 6, goal.y + 6); ctx.lineTo(goal.x + 58 + Math.sin(now / 150) * 4, goal.y + 24); ctx.lineTo(goal.x + 6, goal.y + 44); ctx.fill();
+                txt('ف', goal.x + 26, goal.y + 25, 16, '#fff');
+            }
+            const cpx = checkpoint.x, cpy = (GR) * TS;
+            ctx.fillStyle = '#94a3b8'; ctx.fillRect(cpx, cpy - 84, 5, 84); ctx.fillStyle = cpHit ? '#4ade80' : '#64748b'; ctx.beginPath(); ctx.moveTo(cpx + 5, cpy - 84); ctx.lineTo(cpx + 40, cpy - 70); ctx.lineTo(cpx + 5, cpy - 56); ctx.fill();
+            // العملات
+            coins.forEach((c) => {
+                if (c.got || c.x < camX - 40 || c.x > camX + view.vw + 40) return;
+                const sx = Math.abs(Math.sin(now / 250 + c.ph));
+                ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.ellipse(c.x, c.y, 4 + 9 * sx, 12, 0, 0, 7); ctx.fill();
+                ctx.strokeStyle = '#a16207'; ctx.lineWidth = 2; ctx.stroke();
+            });
+            items.forEach((it) => { ctx.font = '34px "Segoe UI Emoji","Apple Color Emoji",sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.fillText(it.type === 'big' ? '⚡' : '🔥', it.x + it.w / 2, it.y + it.h / 2); });
+            enemies.forEach(drawEnemy);
+            fbs.forEach((f) => { ctx.fillStyle = '#fb923c'; ctx.shadowColor = '#fb923c'; ctx.shadowBlur = 12; ctx.beginPath(); ctx.arc(f.x, f.y, 8, 0, 7); ctx.fill(); ctx.fillStyle = '#fde047'; ctx.beginPath(); ctx.arc(f.x, f.y, 4, 0, 7); ctx.fill(); ctx.shadowBlur = 0; });
+            if (player) drawHero(player);
+            parts.forEach((q) => { ctx.globalAlpha = Math.min(1, q.t * 2); ctx.fillStyle = q.c; ctx.fillRect(q.x - 3, q.y - 3, 6, 6); }); ctx.globalAlpha = 1;
+            pops.forEach((q) => { ctx.globalAlpha = Math.min(1, q.t * 2); txt(q.txt, q.x, q.y, 20, q.c, '#000'); }); ctx.globalAlpha = 1;
+        }
+
+        const BONES = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
+        function drawPip(x, y, pw) {
+            const ph = pw * 0.75;
+            ctx.save(); rrect(x, y, pw, ph, 8); ctx.clip();
+            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, pw, ph);
+            if (poseStatus === 'ok' && video.videoWidth) { ctx.save(); ctx.translate(x + pw, y); ctx.scale(-1, 1); ctx.globalAlpha = 0.6; ctx.drawImage(video, 0, 0, pw, ph); ctx.restore(); ctx.globalAlpha = 1; }
+            poses.forEach((lm) => {
+                ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 3; ctx.beginPath();
+                BONES.forEach(([a, b]) => { if (lm[a] && lm[b]) { ctx.moveTo(x + (1 - lm[a].x) * pw, y + lm[a].y * ph); ctx.lineTo(x + (1 - lm[b].x) * pw, y + lm[b].y * ph); } });
+                ctx.stroke();
+            });
+            ctx.restore();
+            ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2; rrect(x, y, pw, ph, 8); ctx.stroke();
+            return ph;
+        }
+
+        function draw() {
+            GC.begin(ctx);
+            ctx.fillStyle = '#0b1730'; ctx.fillRect(0, 0, w, h);
+            if (phase === 'MENU') return;
+            layoutView();
+            drawBackground();
+            const s = view.s;
+            ctx.save();
+            const sx = shake > 0 ? (Math.random() - 0.5) * shake * 20 : 0, sy = shake > 0 ? (Math.random() - 0.5) * shake * 20 : 0;
+            ctx.translate(-camX * s + sx, view.oy + sy); ctx.scale(s, s);
+            drawWorld();
+            ctx.restore();
+            // الواجهة
+            const fs = Math.max(15, Math.min(30, h * 0.04));
+            ctx.fillStyle = 'rgba(4,10,24,0.55)'; rrect(8, 8, fs * 11.5, fs * 2.7, 10); ctx.fill();
+            for (let i = 0; i < Math.min(lives, 6); i++) { ctx.font = `${fs}px "Segoe UI Emoji",sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = '#fff'; ctx.fillText('❤️', 16 + i * fs * 1.15, 14); }
+            txt(`🪙 ${toAr(coinCount)}      ⭐ ${toAr(score)}`, 16, 14 + fs * 1.85, fs * 0.78, '#fde047', undefined, 'left');
+            txt(`المرحلة ${toAr(lvl)} / ${toAr(MAX_LEVEL)} — ${L.name}`, w / 2, 14 + fs * 0.6, fs * 0.85, '#fff', '#000');
+            // نافذة الكاميرا ومؤشرات الأوامر
+            const pw = clamp(w * 0.16, 110, 200), px = w - pw - 10, py = 10;
+            const ph = drawPip(px, py, pw);
+            drawGauge(px, py + ph + 10, pw);
+            const cx = w / 2, cy = h * 0.42, big = Math.max(40, Math.min(w, h) * 0.12);
+            if (phase === 'READY') {
+                const n = Math.ceil(phaseT / 60);
+                ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, cy - big * 0.9, w, big * 1.9);
+                txt(n > 2 ? 'استعد' : String(n), cx, cy - big * 0.15, big, '#fde047', '#000');
+                txt(`المرحلة ${toAr(lvl)}: ${L.name}`, cx, cy + big * 0.55, Math.max(14, big * 0.26), '#fff', '#000');
+            } else if (phase === 'CLEAR') {
+                ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, cy - big * 0.8, w, big * 1.6);
+                txt(banner, cx, cy - big * 0.15, Math.max(24, big * 0.45), '#4ade80', '#000'); txt(sub, cx, cy + big * 0.4, Math.max(14, big * 0.24), '#fff');
+            } else if (phase === 'OVER') {
+                ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, cy - big * 0.7, w, big * 1.4);
+                txt(result.won ? '🏆 أنهيت المغامرة!' : 'انتهت اللعبة', cx, cy, Math.max(26, big * 0.5), '#fff', '#fbbf24');
+            } else if (phase === 'DEAD') { ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(0, 0, w, h); }
+            if (bannerT > 0 && phase === 'PLAY') { txt(banner, cx, h * 0.28, Math.max(24, big * 0.45), '#fde047', '#000'); txt(sub, cx, h * 0.28 + big * 0.5, Math.max(14, big * 0.22), '#fff', '#000'); }
+        }
+        function drawGauge(x, y, gw) {
+            const p = player; if (!p) return;
+            ctx.fillStyle = 'rgba(0,0,0,0.5)'; rrect(x, y, gw, 58, 8); ctx.fill();
+            const mx = x + 12, mw = gw - 24;
+            ctx.fillStyle = 'rgba(255,255,255,0.18)'; rrect(mx, y + 12, mw, 6, 3); ctx.fill();
+            ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fillRect(mx + mw / 2 - 1, y + 7, 2, 16);
+            if (!p.seen && poseStatus === 'ok') { txt('⚠ لا أراك', x + gw / 2, y + 36, 14, '#fca5a5'); return; }
+            ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(mx + mw / 2 + p.u * mw / 2, y + 15, 7, 0, 7); ctx.fill();
+            const on = (t) => now - t < 300;
+            [['☝️', p.handUp || on(p.flashJ)], ['🔥', on(p.flashF)]].forEach(([e, o], i) => {
+                ctx.fillStyle = o ? '#fbbf24' : 'rgba(255,255,255,0.12)'; rrect(x + gw / 2 - 44 + i * 46, y + 26, 42, 26, 7); ctx.fill();
+                ctx.font = '16px "Segoe UI Emoji",sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.fillText(e, x + gw / 2 - 23 + i * 46, y + 40);
+            });
+        }
+
+        function loop(t) {
+            const dt = Math.min((t - lastT) / 1000, 0.1);
+            lastT = t; now = t;
+            detect(t);
+            if (phase !== 'MENU') { acc += dt; let n = 0; while (acc >= DT && n < 6) { tick(t); acc -= DT; n++; } if (n === 6) acc = 0; } else acc = 0;
+            draw();
+            requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+        initPose();
+
+        // واجهة للاختبار الآلي (?sim=1)
+        window.RUNNER = {
+            cfg, startGame, startLevel, SENS,
+            get player() { return player; }, get enemies() { return enemies; }, get phase() { return phase; }, get lvl() { return lvl; }, get grid() { return grid; },
+            get lives() { return lives; }, get coins() { return coinCount; }, get score() { return score; }, get goal() { return goal; }, get boss() { return boss; },
+            get checkpoint() { return checkpoint; }, get worldW() { return worldW; }, get camX() { return camX; },
+            injectBody(o) { curRaw = Object.assign({ lean: 0, cx: 0.5, sy: 300, swpx: 200, upR: -1, upL: -1 }, o); seenRaw = performance.now(); },
+            step(n = 1) { for (let i = 0; i < n; i++) tick(performance.now()); draw(); },
+            sim(n = 1, fn) { for (let i = 0; i < n; i++) { if (fn) fn(); tick(performance.now()); } },
+            hold(code, on) { window.dispatchEvent(new KeyboardEvent(on ? 'keydown' : 'keyup', { code, bubbles: true, cancelable: true })); }
+        };
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

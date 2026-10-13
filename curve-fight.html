@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>معركة المنحنيات</title>
+    <script src="game-common.js"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+            background: #070b16; color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; -webkit-user-select: none; user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #video { position: fixed; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+        .overlay {
+            position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; text-align: center;
+            background: rgba(6, 10, 22, 0.95); padding: 16px; overflow-y: auto;
+        }
+        .overlay > * { flex-shrink: 0; }
+        h1 { margin: 0 0 8px; font-size: clamp(1.8rem, 7vw, 3rem); color: #fb7185; text-shadow: 0 0 14px rgba(251, 113, 133, 0.6); }
+        p { margin: 0 0 12px; max-width: 640px; line-height: 1.7; color: #cbd5e1; font-size: clamp(0.92rem, 3.4vw, 1.1rem); }
+        .how { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 0 0 12px; }
+        .how span { background: rgba(255,255,255,0.08); border-radius: 12px; padding: 6px 12px; font-size: 0.95rem; }
+        button {
+            font-family: inherit; cursor: pointer; border: 2px solid #fb7185; color: #fff;
+            background: #be123c; border-radius: 50px; padding: 12px 40px;
+            font-size: clamp(1.1rem, 4.5vw, 1.4rem); box-shadow: 0 0 16px rgba(251, 113, 133, 0.45);
+        }
+        button:active { transform: scale(0.97); }
+        .grp { display: flex; align-items: center; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 0 0 10px; }
+        .grp label { color: #94a3b8; font-size: 0.95rem; min-width: 96px; text-align: end; }
+        .row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+        .opt { padding: 7px 16px; font-size: 1rem; background: #172036; box-shadow: none; border-color: transparent; border-radius: 14px; }
+        .opt small { display: block; font-size: 0.68rem; opacity: 0.85; }
+        .opt.sel { background: #fb7185; color: #3b0613; }
+        .opt:disabled { opacity: 0.3; cursor: default; }
+        .hidden { display: none !important; }
+        .loader { border: 5px solid rgba(255,255,255,0.1); border-top-color: #fb7185; border-radius: 50%; width: 46px; height: 46px; animation: spin 1s linear infinite; margin-bottom: 12px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #startBtn { margin-top: 6px; }
+        @media (max-height: 560px) {
+            h1 { margin-bottom: 2px; } p { margin-bottom: 6px; } .grp { margin-bottom: 4px; } .how { margin-bottom: 6px; }
+            button { padding: 8px 26px; } .opt { padding: 4px 12px; } .grp label { min-width: 0; }
+        }
+    </style>
+</head>
+<body>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+    <div id="overlay" class="overlay">
+        <div id="loader" class="loader"></div>
+        <h1 id="title">🌀 معركة المنحنيات</h1>
+        <p id="desc">جاري تحميل نموذج تتبع الجسم...</p>
+        <div class="how hidden" id="how">
+            <span>↔️ مِل بجسمك يميناً أو يساراً لتدور</span>
+            <span>🚧 لا تلمس أي خط أو حافة</span>
+            <span>🕳️ اعبر من الفجوات في الخطوط</span>
+        </div>
+        <div class="grp hidden" id="g1"><label>اللاعبون (بالكاميرا)</label><div class="row" id="humansRow"></div></div>
+        <div class="grp hidden" id="g2"><label>لاعبو الحاسوب</label><div class="row" id="botsRow"></div></div>
+        <div class="grp hidden" id="g3"><label>المستوى</label><div class="row" id="levelRow"></div></div>
+        <div class="grp hidden" id="g4"><label>حساسية الميلان</label><div class="row" id="sensRow"></div></div>
+        <button id="startBtn" class="hidden">ابدأ المعركة</button>
+    </div>
+
+    <script>
+        const $ = (id) => document.getElementById(id);
+        const canvas = $('canvas'), ctx = canvas.getContext('2d'), video = $('video');
+        const overlay = $('overlay'), titleEl = $('title'), descEl = $('desc'), loader = $('loader'), howEl = $('how');
+        const startBtn = $('startBtn');
+        const toAr = (n) => String(n).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[d]);
+
+        /* ---------------- الإعدادات ----------------
+           speed: سرعة الخط (بكسل/ثانية) | turn: أقصى سرعة دوران (راديان/ثانية) | wrap: الحواف تعبر للجهة المقابلة
+           pu: ظهور الهدايا | skill: ذكاء الحاسوب */
+        const LEVELS = [
+            { name: 'المبتدئ', sub: 'الحواف تعبر للجهة الأخرى', speed: 125, turn: 2.7, wrap: true,  pu: 0, skill: 0.6 },
+            { name: 'كلاسيك',  sub: 'حواف قاتلة وهدايا',         speed: 150, turn: 2.9, wrap: false, pu: 1, skill: 0.8 },
+            { name: 'السريع',  sub: 'أسرع وأصعب',                speed: 185, turn: 3.2, wrap: false, pu: 1, skill: 0.95 }
+        ];
+        const SENS = [
+            { name: 'حساس', sub: 'ميلان خفيف', full: 11 },
+            { name: 'عادي', sub: 'مناسب للأغلبية', full: 15 },
+            { name: 'واسع', sub: 'ميلان كبير', full: 21 }
+        ];
+        const COLORS = ['#f472b6', '#38bdf8', '#facc15', '#4ade80', '#c084fc', '#fb923c'];
+        const PUS = {
+            speed: { e: '⚡', c: '#facc15', ar: 'سرعة!' },
+            slow:  { e: '🐌', c: '#a78bfa', ar: 'أبطأ الجميع' },
+            ghost: { e: '👻', c: '#e2e8f0', ar: 'شبح!' },
+            rev:   { e: '🔄', c: '#fb7185', ar: 'عكس الاتجاه' },
+            clear: { e: '🧹', c: '#4ade80', ar: 'مسح الخطوط' }
+        };
+        const PU_KEYS = Object.keys(PUS);
+        const TARGET = 3;            // أول من يفوز بثلاث جولات
+        const STEP = 1 / 60;         // خطوة المحاكاة الثابتة
+        const R = 3.6;               // نصف سماكة الخط
+        const GRACE = 9;             // خطوات يُتجاهل فيها اصطدامك بذيلك القريب
+        const Q = 2;                 // دقة طبقة الخطوط
+        const KEYMAP = [['KeyA', 'KeyD'], ['ArrowLeft', 'ArrowRight'], ['KeyJ', 'KeyL'], ['Numpad4', 'Numpad6']];
+
+        const cfg = { humans: 2, bots: 0, level: 1, sens: 1 };
+        let w = 0, h = 0, lastT = performance.now(), acc = 0;
+        let phase = 'MENU';          // MENU, READY, PLAY, ROUNDEND, MATCHEND
+        let PS = [], PU = [], parts = [], pops = [];
+        let AW = 1280, AH = 720, grid = new Int32Array(1), trail = null, tctx = null, WRAP = false;
+        let stepNo = 0, roundSteps = 0, phaseT = 0, puT = 0, banner = '', sub = '', roundNo = 0, matchOver = false;
+        let poseStatus = 'loading';  // loading, ok, failed, sim
+        let poses = [];
+
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; });
+        const hudH = () => Math.round(Math.max(54, Math.min(88, h * 0.1)));
+
+        /* ---------------- تتبع الجسم ---------------- */
+        const VISION_VER = '0.10.14';
+        let landmarker = null, lastVideoT = -1;
+        async function loadVision() {
+            let mod, base;
+            try { mod = await import('./vendor/tasks-vision/vision_bundle.mjs'); base = new URL('./vendor/tasks-vision/wasm', location.href).href; }
+            catch (e) {
+                mod = await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION_VER}/vision_bundle.mjs`);
+                base = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION_VER}/wasm`;
+            }
+            const fs = await mod.FilesetResolver.forVisionTasks(base);
+            const local = './vendor/models/pose_landmarker_lite.task';
+            let modelPath = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+            try { const r = await fetch(local, { method: 'HEAD' }); if (r.ok) modelPath = local; } catch (e) { /* لا يوجد ملف محلي */ }
+            const opts = (delegate) => ({
+                baseOptions: { modelAssetPath: modelPath, delegate }, runningMode: 'VIDEO', numPoses: 4,
+                minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5
+            });
+            try { return await mod.PoseLandmarker.createFromOptions(fs, opts('GPU')); }
+            catch (e) { return await mod.PoseLandmarker.createFromOptions(fs, opts('CPU')); }
+        }
+        async function initPose() {
+            if (new URLSearchParams(location.search).has('sim')) { poseStatus = 'sim'; return readyMenu(); }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { poseStatus = 'failed'; return readyMenu(); }
+            try {
+                landmarker = await loadVision();
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+                video.srcObject = stream;
+                await video.play();
+                poseStatus = 'ok';
+            } catch (e) {
+                console.error(e);
+                poseStatus = 'failed';
+            }
+            readyMenu();
+        }
+
+        /* زاوية ميلان الجذع (بالدرجات): موجبة = مال اللاعب إلى يمينه (يمين الشاشة المعكوسة).
+           الأساس: الخط من منتصف الوركين إلى منتصف الكتفين. إن لم يظهر الوركان نستعمل الرأس وميلان الكتفين. */
+        function leanFrom(lm, vw, vh) {
+            const L = lm[11], Rr = lm[12], deg = 180 / Math.PI;
+            const roll = -Math.atan2((L.y - Rr.y) * vh, (L.x - Rr.x) * vw) * deg;
+            const sx = (L.x + Rr.x) / 2, sy = (L.y + Rr.y) / 2;
+            const hp = lm[23], hq = lm[24];
+            if (hp && hq && hp.visibility > 0.35 && hq.visibility > 0.35) {
+                const hx = (hp.x + hq.x) / 2, hy = (hp.y + hq.y) / 2;
+                const t = -Math.atan2((sx - hx) * vw, (hy - sy) * vh) * deg;
+                return { tilt: t * 0.85 + roll * 0.15, full: true };
+            }
+            const n = lm[0];
+            const swpx = Math.max(1, Math.abs(L.x - Rr.x) * vw);
+            const head = n ? -Math.atan2((n.x - sx) * vw, swpx * 0.9) * deg : 0;
+            return { tilt: head * 0.6 + roll * 0.4, full: false };
+        }
+
+        function detect(now) {
+            if (poseStatus !== 'ok' || !landmarker || video.readyState < 2 || video.currentTime === lastVideoT) return;
+            lastVideoT = video.currentTime;
+            let res;
+            try { res = landmarker.detectForVideo(video, now); } catch (e) { return; }
+            const vw = video.videoWidth, vh = video.videoHeight;
+            const nH = cfg.humans;
+            let list = (res.landmarks || [])
+                .filter((lm) => lm[11] && lm[12] && lm[11].visibility > 0.4 && lm[12].visibility > 0.4)
+                .map((lm) => ({ lm, cx: 1 - (lm[11].x + lm[12].x) / 2, sw: Math.abs(lm[11].x - lm[12].x) }));
+            const assigned = new Array(nH).fill(null);
+            if (nH === 1) {
+                if (list.length) assigned[0] = list.reduce((a, b) => (b.sw > a.sw ? b : a));
+            } else if (list.length >= nH) {
+                list = list.sort((a, b) => b.sw - a.sw).slice(0, nH).sort((a, b) => a.cx - b.cx);
+                list.forEach((d, i) => { assigned[i] = d; });
+            } else {
+                list.sort((a, b) => a.cx - b.cx).forEach((d) => {
+                    let best = -1, bd = 9;
+                    for (let j = 0; j < nH; j++) {
+                        if (assigned[j]) continue;
+                        const dd = Math.abs(d.cx - (j + 0.5) / nH);
+                        if (dd < bd) { bd = dd; best = j; }
+                    }
+                    if (best >= 0) assigned[best] = d;
+                });
+            }
+            poses = assigned.map((a) => (a ? a.lm : null));
+            assigned.forEach((a, i) => {
+                const p = PS[i];
+                if (!p || !p.human || !a) return;
+                const r = leanFrom(a.lm, vw, vh);
+                p.rawTilt = r.tilt;
+                p.tilt = p.seenAt ? p.tilt + (r.tilt - p.tilt) * 0.45 : r.tilt;
+                p.seenAt = now;
+            });
+        }
+
+        /* ---------------- لوحة المفاتيح واللمس (احتياط) ---------------- */
+        const keyDown = new Set();
+        let touchSteer = 0;
+        const allKeys = new Set(KEYMAP.flat());
+        window.addEventListener('keydown', (e) => {
+            if (!allKeys.has(e.code) || phase === 'MENU') return;
+            e.preventDefault(); e.stopPropagation();
+            keyDown.add(e.code);
+        }, true);
+        window.addEventListener('keyup', (e) => { keyDown.delete(e.code); });
+        window.addEventListener('blur', () => { keyDown.clear(); touchSteer = 0; });
+        window.addEventListener('pointerdown', (e) => {
+            if (phase === 'MENU' || (e.target.closest && e.target.closest('button, .overlay, #remote-back-btn'))) return;
+            touchSteer = e.clientX < w / 2 ? -1 : 1;
+        });
+        const clearTouch = () => { touchSteer = 0; };
+        window.addEventListener('pointerup', clearTouch);
+        window.addEventListener('pointercancel', clearTouch);
+
+        // يحسب توجيه كل لاعب بشري من (لوحة المفاتيح > اللمس > الجسم)
+        function readSteers(now) {
+            const sens = SENS[cfg.sens], dz = 3.5;
+            PS.forEach((p) => {
+                if (!p.human) return;
+                const km = KEYMAP[p.i];
+                let k = (keyDown.has(km[1]) ? 1 : 0) - (keyDown.has(km[0]) ? 1 : 0);
+                if (!k && p.i === 0) k = touchSteer;
+                if (p.force !== undefined) k = p.force;
+                p.seen = p.seenAt && now - p.seenAt < 600;
+                if (k) { p.steer = k; return; }
+                if (!p.seen) { p.steer = 0; return; }
+                if (p.base === null) p.base = p.tilt;
+                const rel = p.tilt - p.base;
+                const m = Math.abs(rel);
+                p.steer = m <= dz ? 0 : Math.sign(rel) * Math.min(1, (m - dz) / Math.max(1, sens.full - dz));
+            });
+        }
+        // المعايرة: نعتبر وقفة اللاعب أثناء العدّ التنازلي هي «المستقيم»
+        function calibrate() {
+            PS.forEach((p) => {
+                if (!p.human || !p.seen) return;
+                p.base = p.base === null ? p.tilt : p.base + (p.tilt - p.base) * 0.08;
+            });
+        }
+
+        /* ---------------- ميدان اللعب ---------------- */
+        function solid(x, y, self) {
+            if (WRAP) { x = ((x % AW) + AW) % AW; y = ((y % AH) + AH) % AH; }
+            else if (x < 0 || y < 0 || x >= AW || y >= AH) return true;
+            const v = grid[(y | 0) * AW + (x | 0)];
+            if (!v) return false;
+            if ((v & 7) - 1 === self && stepNo - (v >> 3) < GRACE) return false;
+            return true;
+        }
+        function hit(x, y, a, self) {
+            if (!WRAP && (x < R || y < R || x > AW - R || y > AH - R)) return true;
+            const d = R + 0.9, s = R + 0.3;
+            return solid(x + Math.cos(a) * d, y + Math.sin(a) * d, self)
+                || solid(x + Math.cos(a - 0.7) * s, y + Math.sin(a - 0.7) * s, self)
+                || solid(x + Math.cos(a + 0.7) * s, y + Math.sin(a + 0.7) * s, self);
+        }
+        function stamp(x, y, owner) {
+            const v = ((stepNo << 3) | (owner + 1)), r2 = R * R, ri = Math.ceil(R);
+            for (let dy = -ri; dy <= ri; dy++) {
+                for (let dx = -ri; dx <= ri; dx++) {
+                    if (dx * dx + dy * dy > r2) continue;
+                    let px = Math.round(x + dx), py = Math.round(y + dy);
+                    if (WRAP) { px = ((px % AW) + AW) % AW; py = ((py % AH) + AH) % AH; }
+                    else if (px < 0 || py < 0 || px >= AW || py >= AH) continue;
+                    grid[py * AW + px] = v;
+                }
+            }
+        }
+
+        const nameOf = (p) => (p.human ? 'لاعب ' : 'حاسوب ') + toAr(p.human ? p.i + 1 : p.i - cfg.humans + 1);
+
+        function startMatch() {
+            GC.audioInit();
+            PS = [];
+            const total = Math.min(6, cfg.humans + cfg.bots);
+            for (let i = 0; i < total; i++) {
+                PS.push({
+                    i, human: i < cfg.humans, color: COLORS[i], score: 0, alive: true,
+                    x: 0, y: 0, a: 0, steer: 0, tilt: 0, rawTilt: 0, base: null, seenAt: 0, seen: false,
+                    drawing: true, gapIn: 0, gapLeft: 0, boostT: 0, slowT: 0, ghostT: 0, revT: 0,
+                    botT: 0, botS: 0, diedAt: 0
+                });
+            }
+            roundNo = 0; matchOver = false;
+            overlay.classList.add('hidden');
+            newRound();
+        }
+
+        function newRound() {
+            const asp = w / Math.max(200, h - hudH());
+            if (asp >= 1) { AH = 720; AW = Math.round(Math.max(520, Math.min(1500, 720 * asp))); }
+            else { AW = 720; AH = Math.round(Math.min(1400, 720 / asp)); }
+            WRAP = LEVELS[cfg.level].wrap;
+            grid = new Int32Array(AW * AH);
+            if (!trail) { trail = document.createElement('canvas'); tctx = trail.getContext('2d'); }
+            trail.width = AW * Q; trail.height = AH * Q;
+            tctx.setTransform(Q, 0, 0, Q, 0, 0); tctx.lineCap = 'round'; tctx.lineJoin = 'round';
+            stepNo = 1; roundSteps = 0; roundNo++;
+            PU = []; parts = []; pops = [];
+            puT = 240 + Math.random() * 180 | 0;
+            const placed = [];
+            PS.forEach((p) => {
+                let x, y, tries = 0;
+                do {
+                    x = AW * (0.2 + Math.random() * 0.6); y = AH * (0.2 + Math.random() * 0.6); tries++;
+                } while (tries < 300 && placed.some((q) => Math.hypot(q.x - x, q.y - y) < 150));
+                placed.push({ x, y });
+                p.x = x; p.y = y;
+                p.a = Math.atan2(AH / 2 - y, AW / 2 - x) + (Math.random() - 0.5) * 1.2;
+                p.alive = true; p.drawing = true; p.gapIn = 160 + Math.random() * 240; p.gapLeft = 0;
+                p.boostT = p.slowT = p.ghostT = p.revT = 0; p.botT = 0; p.steer = 0; p.diedAt = 0;
+            });
+            phase = 'READY'; phaseT = 200; banner = ''; sub = '';
+        }
+
+        /* ---------------- الحاسوب ---------------- */
+        function botSteer(p, L) {
+            if (p.botT > 0) { p.botT--; return p.botS; }
+            const sk = L.skill, n = Math.round(9 + sk * 13), ds = 5, dth = L.turn * (ds / L.speed);
+            let bestS = 0, bestF = -1, allFree = true;
+            for (const s of [0, -1, 1]) {
+                let x = p.x, y = p.y, a = p.a, f = 0;
+                for (let k = 1; k <= n; k++) {
+                    a += s * dth; x += Math.cos(a) * ds; y += Math.sin(a) * ds;
+                    if (hit(x, y, a, p.i)) { allFree = false; break; }
+                    f = k;
+                }
+                const sc = f - (s ? 0.8 : 0);
+                if (sc > bestF + 0.001) { bestF = sc; bestS = s; }
+            }
+            let out = bestS;
+            if (Math.random() < (1 - sk) * 0.05) { out = [-1, 0, 1][Math.random() * 3 | 0]; p.botT = 9; }
+            else if (allFree && Math.random() < 0.025) { out = (Math.random() < 0.5 ? -0.5 : 0.5); p.botT = 18; }
+            else p.botT = 3;
+            p.botS = out;
+            return out;
+        }
+
+        /* ---------------- الهدايا ---------------- */
+        function spawnPU() {
+            if (PU.length >= 2) return;
+            for (let t = 0; t < 40; t++) {
+                const x = 50 + Math.random() * (AW - 100), y = 50 + Math.random() * (AH - 100);
+                if (solid(x, y, -1) || PS.some((p) => p.alive && Math.hypot(p.x - x, p.y - y) < 60)) continue;
+                PU.push({ type: PU_KEYS[Math.random() * PU_KEYS.length | 0], x, y, t: 12 });
+                return;
+            }
+        }
+        function applyPU(p, type) {
+            const meta = PUS[type];
+            pops.push({ x: p.x, y: p.y - 18, txt: meta.e + ' ' + meta.ar, c: meta.c, t: 1.2 });
+            GC.beep(880, 0.12, 'triangle', 0.12); GC.beep(1320, 0.14, 'triangle', 0.1, 0.08);
+            if (type === 'speed') p.boostT = 4;
+            else if (type === 'ghost') p.ghostT = 3;
+            else if (type === 'slow') PS.forEach((q) => { if (q !== p && q.alive) q.slowT = 4; });
+            else if (type === 'rev') PS.forEach((q) => { if (q !== p && q.alive) q.revT = 4; });
+            else if (type === 'clear') {
+                grid.fill(0); tctx.clearRect(0, 0, AW, AH);
+                PS.forEach((q) => { if (q.alive) stamp(q.x, q.y, q.i); });
+            }
+        }
+
+        /* ---------------- خطوة المحاكاة ---------------- */
+        function burst(x, y, color) {
+            for (let k = 0; k < 26; k++) {
+                const a = Math.random() * 6.283, s = 40 + Math.random() * 190;
+                parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, t: 0.5 + Math.random() * 0.6, c: color });
+            }
+        }
+
+        function simStep() {
+            const L = LEVELS[cfg.level];
+            stepNo++; roundSteps++;
+            PS.forEach((p) => {
+                if (!p.alive) return;
+                p.boostT = Math.max(0, p.boostT - STEP); p.slowT = Math.max(0, p.slowT - STEP);
+                p.ghostT = Math.max(0, p.ghostT - STEP); p.revT = Math.max(0, p.revT - STEP);
+            });
+            if (L.pu) {
+                if (--puT <= 0) { spawnPU(); puT = 300 + Math.random() * 240 | 0; }
+                PU.forEach((u) => { u.t -= STEP; });
+                PU = PU.filter((u) => u.t > 0);
+            }
+            // 1) نحسب كل الحركات ونكشف الاصطدام قبل أن يرسم أي لاعب في هذه الخطوة (حتى يموت الاثنان عند الاصطدام المباشر)
+            const moves = [];
+            PS.forEach((p) => {
+                if (!p.alive) return;
+                let s = p.human ? p.steer : botSteer(p, L);
+                if (p.revT > 0) s = -s;
+                p.a += s * L.turn * STEP;
+                const sp = L.speed * (p.boostT > 0 ? 1.45 : 1) * (p.slowT > 0 ? 0.62 : 1) * STEP;
+                let nx = p.x + Math.cos(p.a) * sp, ny = p.y + Math.sin(p.a) * sp, jumped = false;
+                if (WRAP) {
+                    const wx = ((nx % AW) + AW) % AW, wy = ((ny % AH) + AH) % AH;
+                    jumped = wx !== nx || wy !== ny; nx = wx; ny = wy;
+                }
+                const dead = p.ghostT <= 0 && hit(nx, ny, p.a, p.i);
+                moves.push({ p, nx, ny, sp, jumped, dead });
+            });
+            // 2) تطبيق الحركات
+            moves.forEach((m) => {
+                const p = m.p;
+                if (m.dead) {
+                    p.alive = false; p.diedAt = roundSteps;
+                    burst(p.x, p.y, p.color);
+                    GC.beep(220, 0.35, 'sawtooth', 0.14, 0, 70);
+                    return;
+                }
+                if (p.drawing && p.ghostT <= 0) {
+                    tctx.strokeStyle = p.color; tctx.lineWidth = R * 2;
+                    tctx.beginPath(); tctx.moveTo(p.x, p.y);
+                    tctx.lineTo(m.jumped ? p.x : m.nx, m.jumped ? p.y : m.ny); tctx.stroke();
+                    stamp(m.nx, m.ny, p.i);
+                }
+                p.x = m.nx; p.y = m.ny;
+                if (p.drawing) { p.gapIn -= m.sp; if (p.gapIn <= 0) { p.drawing = false; p.gapLeft = 26 + Math.random() * 14; } }
+                else { p.gapLeft -= m.sp; if (p.gapLeft <= 0) { p.drawing = true; p.gapIn = 180 + Math.random() * 300; } }
+                for (let k = PU.length - 1; k >= 0; k--) {
+                    if (Math.hypot(PU[k].x - p.x, PU[k].y - p.y) < 13 + R) { const u = PU.splice(k, 1)[0]; applyPU(p, u.type); }
+                }
+            });
+            // 3) هل انتهت الجولة؟
+            const alive = PS.filter((p) => p.alive);
+            const solo = PS.length === 1;
+            if (solo ? alive.length === 0 : alive.length <= 1) endRound(alive[0]);
+        }
+
+        function endRound(winner) {
+            phase = 'ROUNDEND'; phaseT = 130;
+            if (PS.length === 1) {
+                const secs = Math.round(roundSteps * STEP * 10) / 10, best = GC.store.get('curve_best');
+                if (secs > best) GC.store.set('curve_best', secs);
+                banner = `صمدت ${toAr(secs)} ثانية`; sub = secs > best ? '🏆 رقم قياسي جديد!' : `أفضل رقم: ${toAr(Math.max(best, secs))} ث`;
+                matchOver = true; phaseT = 190;
+                GC.beep(520, 0.2, 'triangle', 0.12);
+                return;
+            }
+            if (winner) {
+                winner.score++;
+                banner = `🏆 فاز ${nameOf(winner)}!`; sub = `الجولة ${toAr(roundNo)}`;
+                GC.beep(660, 0.15, 'triangle', 0.14); GC.beep(990, 0.25, 'triangle', 0.14, 0.14);
+                if (winner.score >= TARGET) { matchOver = true; phaseT = 210; }
+            } else { banner = 'تعادل!'; sub = 'لا أحد نجا'; }
+        }
+
+        function tick(now) {
+            parts.forEach((q) => { q.x += q.vx * STEP; q.y += q.vy * STEP; q.vx *= 0.96; q.vy *= 0.96; q.t -= STEP; });
+            parts = parts.filter((q) => q.t > 0);
+            pops.forEach((q) => { q.t -= STEP; q.y -= 14 * STEP; });
+            pops = pops.filter((q) => q.t > 0);
+            if (phase === 'READY') {
+                readSteers(now); calibrate();
+                const n = Math.ceil(phaseT / 60);
+                if (phaseT % 60 === 0 && phaseT > 0) GC.beep(440, 0.1, 'square', 0.1);
+                if (--phaseT <= 0) { phase = 'PLAY'; GC.beep(880, 0.3, 'square', 0.14); }
+                return n;
+            }
+            if (phase === 'PLAY') {
+                readSteers(now);
+                // الانجراف البطيء للمعايرة حين يكون اللاعب قريباً من وضعه المحايد
+                PS.forEach((p) => { if (p.human && p.seen && p.base !== null && Math.abs(p.tilt - p.base) < 4) p.base += (p.tilt - p.base) * 0.003; });
+                const humansAlive = PS.some((p) => p.human && p.alive);
+                const reps = humansAlive ? 1 : 4;       // لا بشر أحياء: نُسرّع بقية الجولة
+                for (let i = 0; i < reps && phase === 'PLAY'; i++) simStep();
+            } else if (phase === 'ROUNDEND') {
+                if (--phaseT <= 0) { if (matchOver) { phase = 'MATCHEND'; endToMenu(); } else newRound(); }
+            }
+        }
+
+        /* ---------------- القائمة ---------------- */
+        function buildRow(el, items, cur, onPick, disabledFn) {
+            el.innerHTML = '';
+            items.forEach((it, i) => {
+                const b = document.createElement('button');
+                b.className = 'opt' + (i === cur ? ' sel' : '');
+                b.innerHTML = it.sub ? `${it.label}<small>${it.sub}</small>` : it.label;
+                if (disabledFn && disabledFn(i)) b.disabled = true;
+                b.addEventListener('click', () => { onPick(i); renderRows(); });
+                el.appendChild(b);
+            });
+        }
+        function renderRows() {
+            const hs = [1, 2, 3, 4].map((n) => ({ label: toAr(n) }));
+            buildRow($('humansRow'), hs, cfg.humans - 1, (i) => {
+                cfg.humans = i + 1;
+                if (cfg.humans === 1 && cfg.bots === 0) cfg.bots = 2;
+                cfg.bots = Math.min(cfg.bots, 6 - cfg.humans);
+            });
+            buildRow($('botsRow'), [0, 1, 2, 3].map((n) => ({ label: toAr(n) })), cfg.bots, (i) => { cfg.bots = i; },
+                (i) => cfg.humans + i > 6);
+            buildRow($('levelRow'), LEVELS.map((L, i) => ({ label: `${toAr(i + 1)}. ${L.name}`, sub: L.sub })), cfg.level, (i) => { cfg.level = i; });
+            buildRow($('sensRow'), SENS.map((s) => ({ label: s.name, sub: s.sub })), cfg.sens, (i) => { cfg.sens = i; });
+        }
+        function readyMenu(keepText) {
+            loader.classList.add('hidden');
+            howEl.classList.remove('hidden');
+            ['g1', 'g2', 'g3', 'g4', 'startBtn'].forEach((id) => $(id).classList.remove('hidden'));
+            if (!keepText) {
+                titleEl.textContent = '🌀 معركة المنحنيات';
+                descEl.innerHTML = poseStatus === 'ok' || poseStatus === 'sim'
+                    ? 'خطك يكبر خلفك طوال الوقت! <b>مِل بجسمك يميناً أو يساراً</b> لتدور، وابقَ حياً أطول من الجميع. قفوا متجاورين على بعد نحو مترين، <b>اللاعب الأول على يسار الكاميرا</b>. أول من يفوز بثلاث جولات هو البطل.'
+                    : 'تعذّر تشغيل الكاميرا أو تتبع الجسم. يمكنكم اللعب بلوحة المفاتيح: اللاعب ١ (A D) · ٢ (← →) · ٣ (J L) · ٤ (Numpad 4 6) أو بلمس يمين/يسار الشاشة.';
+            }
+            renderRows();
+            overlay.classList.remove('hidden');
+        }
+        startBtn.addEventListener('click', startMatch);
+        function endToMenu() {
+            phase = 'MENU';
+            const sorted = PS.slice().sort((a, b) => b.score - a.score);
+            if (PS.length === 1) {
+                titleEl.textContent = '🌀 انتهى التحدي';
+                descEl.textContent = banner + ' — ' + sub;
+            } else {
+                titleEl.textContent = `🏆 ${nameOf(sorted[0])} بطل المعركة!`;
+                descEl.textContent = sorted.map((p) => `${nameOf(p)}: ${toAr(p.score)}`).join('   ·   ');
+            }
+            startBtn.textContent = 'معركة جديدة';
+            readyMenu(true);
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function txt(s, x, y, size, color, glow) {
+            ctx.font = `bold ${size}px Tahoma, sans-serif`;
+            if (glow) { ctx.shadowColor = glow; ctx.shadowBlur = size * 0.4; }
+            ctx.fillStyle = color; ctx.fillText(s, x, y);
+            ctx.shadowBlur = 0;
+        }
+        function rrect(x, y, rw, rh, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, rw, rh, r) : ctx.rect(x, y, rw, rh); }
+
+        function drawHUD() {
+            const hh = hudH(), n = PS.length, cw = Math.min(w / n, 300), x0 = (w - cw * n) / 2;
+            ctx.fillStyle = 'rgba(6,10,20,0.94)'; ctx.fillRect(0, 0, w, hh);
+            ctx.fillStyle = 'rgba(255,255,255,0.09)'; ctx.fillRect(0, hh - 1, w, 1);
+            const fs = Math.max(13, Math.min(20, hh * 0.27));
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            PS.forEach((p, k) => {
+                const cx = x0 + cw * k + cw / 2;
+                ctx.globalAlpha = p.alive || phase === 'READY' ? 1 : 0.4;
+                txt((p.alive || phase === 'READY' ? '' : '💀 ') + nameOf(p), cx, hh * 0.27, fs, p.color);
+                if (n > 1) {
+                    for (let t = 0; t < TARGET; t++) {
+                        const px = cx + (t - (TARGET - 1) / 2) * 16, py = hh * 0.55;
+                        ctx.beginPath(); ctx.arc(px, py, 5, 0, 7);
+                        if (t < p.score) { ctx.fillStyle = p.color; ctx.fill(); } else { ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5; ctx.stroke(); }
+                    }
+                } else {
+                    txt(toAr((roundSteps * STEP).toFixed(1)) + ' ث', cx, hh * 0.58, fs * 0.9, '#e2e8f0');
+                }
+                if (p.human && poseStatus === 'ok') {
+                    const gw = cw * 0.6, gy = hh - 9;
+                    if (!p.seen) {
+                        txt('⚠ لا أراك', cx, gy - 1, fs * 0.7, '#fca5a5');
+                    } else {
+                        ctx.fillStyle = 'rgba(255,255,255,0.14)'; rrect(cx - gw / 2, gy - 2, gw, 4, 2); ctx.fill();
+                        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.fillRect(cx - 1, gy - 5, 2, 10);
+                        ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(cx + p.steer * gw / 2, gy, 5, 0, 7); ctx.fill();
+                    }
+                }
+                ctx.globalAlpha = 1;
+            });
+        }
+
+        const BONES = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
+        function drawPip(x, y, pw) {
+            const ph = pw * 0.75;
+            ctx.save();
+            rrect(x, y, pw, ph, 8); ctx.clip();
+            ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x, y, pw, ph);
+            if (poseStatus === 'ok' && video.videoWidth) {
+                ctx.save(); ctx.translate(x + pw, y); ctx.scale(-1, 1);
+                ctx.globalAlpha = 0.6; ctx.drawImage(video, 0, 0, pw, ph); ctx.restore(); ctx.globalAlpha = 1;
+            }
+            poses.forEach((lm, i) => {
+                if (!lm || !PS[i]) return;
+                ctx.strokeStyle = PS[i].color; ctx.lineWidth = 3; ctx.beginPath();
+                BONES.forEach(([a, b]) => { if (lm[a] && lm[b]) { ctx.moveTo(x + (1 - lm[a].x) * pw, y + lm[a].y * ph); ctx.lineTo(x + (1 - lm[b].x) * pw, y + lm[b].y * ph); } });
+                ctx.stroke();
+                if (lm[0]) { ctx.fillStyle = PS[i].color; ctx.beginPath(); ctx.arc(x + (1 - lm[0].x) * pw, y + lm[0].y * ph, 5, 0, 7); ctx.fill(); }
+            });
+            ctx.restore();
+            ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2; rrect(x, y, pw, ph, 8); ctx.stroke();
+        }
+
+        function draw(now) {
+            GC.begin(ctx);
+            ctx.fillStyle = '#070b16'; ctx.fillRect(0, 0, w, h);
+            if (phase === 'MENU') return;
+            const hh = hudH(), sc = Math.min(w / AW, (h - hh) / AH);
+            const ox = (w - AW * sc) / 2, oy = hh + (h - hh - AH * sc) / 2;
+            ctx.save();
+            ctx.translate(ox, oy); ctx.scale(sc, sc);
+            ctx.fillStyle = '#0a1222'; ctx.fillRect(0, 0, AW, AH);
+            ctx.strokeStyle = 'rgba(255,255,255,0.035)'; ctx.lineWidth = 1; ctx.beginPath();
+            for (let x = 0; x <= AW; x += 60) { ctx.moveTo(x, 0); ctx.lineTo(x, AH); }
+            for (let y = 0; y <= AH; y += 60) { ctx.moveTo(0, y); ctx.lineTo(AW, y); }
+            ctx.stroke();
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(trail, 0, 0, AW, AH);
+            const pulse = 0.5 + 0.5 * Math.sin(now / 160);
+            // الهدايا
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            PU.forEach((u) => {
+                const m = PUS[u.type];
+                if (u.t < 3 && Math.floor(u.t * 5) % 2) return;
+                ctx.fillStyle = m.c; ctx.globalAlpha = 0.25 + 0.2 * pulse;
+                ctx.beginPath(); ctx.arc(u.x, u.y, 19 + pulse * 3, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+                ctx.strokeStyle = m.c; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(u.x, u.y, 15, 0, 7); ctx.stroke();
+                ctx.font = '18px "Segoe UI Emoji", "Apple Color Emoji", sans-serif'; ctx.fillStyle = '#fff'; ctx.fillText(m.e, u.x, u.y + 1);
+            });
+            // الرؤوس
+            PS.forEach((p) => {
+                if (!p.alive) return;
+                const hr = R * 1.45;
+                ctx.globalAlpha = p.ghostT > 0 && (p.ghostT > 1 || Math.floor(now / 90) % 2) ? 0.4 : 1;
+                if (p.boostT > 0 || p.slowT > 0 || p.revT > 0) {
+                    ctx.strokeStyle = p.boostT > 0 ? '#facc15' : p.slowT > 0 ? '#a78bfa' : '#fb7185'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, hr + 4 + pulse * 2, 0, 7); ctx.stroke();
+                }
+                ctx.fillStyle = p.color; ctx.shadowColor = p.color; ctx.shadowBlur = 14;
+                ctx.beginPath(); ctx.arc(p.x, p.y, hr, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(p.x + Math.cos(p.a) * 1.2, p.y + Math.sin(p.a) * 1.2, hr * 0.45, 0, 7); ctx.fill();
+                if (phase === 'READY') {
+                    // سهم الاتجاه واسم اللاعب
+                    const ax = p.x + Math.cos(p.a) * 46, ay = p.y + Math.sin(p.a) * 46;
+                    ctx.strokeStyle = p.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(p.x + Math.cos(p.a) * 12, p.y + Math.sin(p.a) * 12); ctx.lineTo(ax, ay); ctx.stroke();
+                    ctx.fillStyle = p.color; ctx.beginPath();
+                    ctx.moveTo(ax + Math.cos(p.a) * 9, ay + Math.sin(p.a) * 9);
+                    ctx.lineTo(ax + Math.cos(p.a + 2.4) * 8, ay + Math.sin(p.a + 2.4) * 8);
+                    ctx.lineTo(ax + Math.cos(p.a - 2.4) * 8, ay + Math.sin(p.a - 2.4) * 8); ctx.fill();
+                    ctx.globalAlpha = 1;
+                    txt(nameOf(p), p.x, p.y - 26, 15, p.color, '#000');
+                }
+                ctx.globalAlpha = 1;
+            });
+            parts.forEach((q) => { ctx.globalAlpha = Math.min(1, q.t * 2); ctx.fillStyle = q.c; ctx.fillRect(q.x - 2, q.y - 2, 4, 4); });
+            ctx.globalAlpha = 1;
+            pops.forEach((q) => { ctx.globalAlpha = Math.min(1, q.t * 2); txt(q.txt, q.x, q.y, 15, q.c, '#000'); });
+            ctx.globalAlpha = 1;
+            ctx.restore();
+            // حدود الميدان: قاتلة (أحمر) أو تعبر (أزرق متقطع)
+            ctx.save();
+            ctx.lineWidth = 3;
+            if (WRAP) { ctx.setLineDash([10, 8]); ctx.strokeStyle = 'rgba(56,189,248,0.7)'; }
+            else { ctx.strokeStyle = 'rgba(251,113,133,0.85)'; ctx.shadowColor = '#fb7185'; ctx.shadowBlur = 10; }
+            ctx.strokeRect(ox - 1.5, oy - 1.5, AW * sc + 3, AH * sc + 3);
+            ctx.restore();
+            drawHUD();
+
+            const big = Math.max(44, Math.min(w, h) * 0.17), cx = w / 2, cy = oy + AH * sc * 0.5;
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            if (phase === 'READY') {
+                const n = Math.ceil(phaseT / 60);
+                const pw = Math.min(260, w * 0.32);
+                drawPip(w - pw - 12, hh + 10, pw);
+                ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, cy - big * 0.7, w, big * 1.4);
+                txt(n > 3 ? 'استعدوا' : String(n), cx, cy - big * 0.08, big, '#fde047', '#000');
+                txt(`الجولة ${toAr(roundNo)} — ${poseStatus === 'ok' ? 'قفوا بوضع مستقيم' : 'جاهزون؟'}`, cx, cy + big * 0.55, Math.max(14, big * 0.24), '#fff', '#000');
+            } else if (phase === 'ROUNDEND' || phase === 'MATCHEND') {
+                ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, cy - big * 0.6, w, big * 1.2);
+                txt(banner, cx, cy - big * 0.12, Math.max(28, big * 0.55), '#fff', '#fb7185');
+                txt(sub, cx, cy + big * 0.38, Math.max(14, big * 0.24), '#cbd5e1');
+            }
+        }
+
+        function loop(now) {
+            const dt = Math.min((now - lastT) / 1000, 0.1);
+            lastT = now;
+            detect(now);
+            if (phase !== 'MENU') {
+                acc += dt;
+                let n = 0;
+                while (acc >= STEP && n < 6) { tick(now); acc -= STEP; n++; }
+                if (n === 6) acc = 0;
+            } else acc = 0;
+            draw(now);
+            requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+        initPose();
+
+        // واجهة للاختبار الآلي (?sim=1): تقدّم المحاكاة يدوياً لأن المتصفح المخفي يبطّئ الرسم
+        window.CURVE = {
+            cfg, leanFrom, startMatch,
+            get PS() { return PS; }, get phase() { return phase; }, get PU() { return PU; },
+            get grid() { return grid; }, get AW() { return AW; }, get AH() { return AH; },
+            step(n = 1) { for (let i = 0; i < n; i++) { tick(performance.now()); } draw(performance.now()); },
+            steer(i, v) { if (PS[i]) PS[i].force = v; }
+        };
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>

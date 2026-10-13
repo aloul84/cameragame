@@ -177,6 +177,10 @@
     (function () {
       var GAMES = [
         ['arena.html', '⚡', 'صدام الطاقة', 'FATH ARENA', '#2ee6c5'],
+        ['adventure-run.html', '🦸', 'مغامرة فذ', '٥ مراحل', '#fbbf24'],
+        ['galaxy-fighter.html', '🚀', 'مقاتل المجرة', '١٠ مراحل', '#a78bfa'],
+        ['body-tetris.html', '🧱', 'تتريس الجسم', '١٠ مراحل', '#22d3ee'],
+        ['curve-fight.html', '🌀', 'معركة المنحنيات', '١–٤ لاعبين', '#fb7185'],
         ['arabic-letters.html', '🅰️', 'حروف عربية', 'تعليمي', '#4cc9f0'],
         ['word-builder.html', '🔤', 'بنّاء الكلمات', 'تعليمي', '#38bdf8'],
         ['balance-duel.html', '⚖️', 'ميزان التحدي', 'لاعبان', '#fbbf24'],
@@ -198,7 +202,7 @@
         ['race-with-sound.html', '🏎️', 'سباق مع الصوت', 'سباق', '#fb923c'],
         ['twins-simulator.html', '👯‍♂️', 'محاكي التوأم', 'استوديو', '#22d3ee']
       ];
-      var NEW = { 'arena.html': 1, 'treasure-compass.html': 1, 'simon-says.html': 1, 'light-lab.html': 1, 'move-math.html': 1, 'connect-dots.html': 1, 'emotion-mirror.html': 1 };
+      var NEW = { 'arena.html': 1, 'curve-fight.html': 1, 'body-tetris.html': 1, 'galaxy-fighter.html': 1, 'adventure-run.html': 1, 'treasure-compass.html': 1, 'simon-says.html': 1, 'light-lab.html': 1, 'move-math.html': 1, 'connect-dots.html': 1, 'emotion-mirror.html': 1 };
       var toAr = function (n) { return String(n).replace(/\d/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'[d]; }); };
       var track = document.getElementById('track'), stage = document.getElementById('stage');
       var selTitle = document.getElementById('selTitle'), counter = document.getElementById('counter'), dotsEl = document.getElementById('dots');

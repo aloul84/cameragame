@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>تتريس الجسم</title>
+    <script src="game-common.js"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+            background: #070b16; color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; -webkit-user-select: none; user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #video { position: fixed; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+        #canvas { position: fixed; top: 0; left: 0; display: block; }
+        .overlay {
+            position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; text-align: center;
+            background: rgba(6, 10, 22, 0.95); padding: 16px; overflow-y: auto;
+        }
+        .overlay > * { flex-shrink: 0; }
+        h1 { margin: 0 0 8px; font-size: clamp(1.8rem, 7vw, 3rem); color: #22d3ee; text-shadow: 0 0 14px rgba(34, 211, 238, 0.6); }
+        p { margin: 0 0 12px; max-width: 660px; line-height: 1.7; color: #cbd5e1; font-size: clamp(0.92rem, 3.4vw, 1.1rem); }
+        .how { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 0 0 12px; max-width: 720px; }
+        .how span { background: rgba(255,255,255,0.08); border-radius: 12px; padding: 6px 12px; font-size: 0.92rem; }
+        button {
+            font-family: inherit; cursor: pointer; border: 2px solid #22d3ee; color: #fff;
+            background: #0e7490; border-radius: 50px; padding: 12px 40px;
+            font-size: clamp(1.1rem, 4.5vw, 1.4rem); box-shadow: 0 0 16px rgba(34, 211, 238, 0.45);
+        }
+        button:active { transform: scale(0.97); }
+        .grp { display: flex; align-items: center; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 0 0 10px; }
+        .grp label { color: #94a3b8; font-size: 0.95rem; min-width: 110px; text-align: end; }
+        .row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+        .opt { padding: 7px 16px; font-size: 1rem; background: #172036; box-shadow: none; border-color: transparent; border-radius: 14px; }
+        .opt small { display: block; font-size: 0.68rem; opacity: 0.85; }
+        .opt.sel { background: #22d3ee; color: #04222b; }
+        .hidden { display: none !important; }
+        .loader { border: 5px solid rgba(255,255,255,0.1); border-top-color: #22d3ee; border-radius: 50%; width: 46px; height: 46px; animation: spin 1s linear infinite; margin-bottom: 12px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #startBtn { margin-top: 6px; }
+        @media (max-height: 600px) {
+            h1 { margin-bottom: 2px; } p { margin-bottom: 6px; } .grp { margin-bottom: 4px; } .how { margin-bottom: 6px; }
+            button { padding: 8px 26px; } .opt { padding: 4px 12px; } .grp label { min-width: 0; }
+        }
+    </style>
+</head>
+<body>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+    <div id="overlay" class="overlay">
+        <div id="loader" class="loader"></div>
+        <h1 id="title">🧱 تتريس الجسم</h1>
+        <p id="desc">جاري تحميل نموذج تتبع الجسم...</p>
+        <div class="how hidden" id="how">
+            <span>↔️ مِل أو تحرّك جانباً = تحريك القطعة</span>
+            <span>🙋 ارفع يدك = تدوير (اليمنى ↻ واليسرى ↺)</span>
+            <span>🧎 اجلس قليلاً = نزول سريع</span>
+            <span>🦘 اقفز = إسقاط فوري</span>
+        </div>
+        <div class="grp hidden" id="g1"><label>نمط اللعب</label><div class="row" id="modeRow"></div></div>
+        <div class="grp hidden" id="g2"><label>ابدأ من المرحلة</label><div class="row" id="stageRow"></div></div>
+        <div class="grp hidden" id="g3"><label>حساسية الجسم</label><div class="row" id="sensRow"></div></div>
+        <button id="startBtn" class="hidden">ابدأ اللعب</button>
+    </div>
+
+    <script>
+        const $ = (id) => document.getElementById(id);
+        const canvas = $('canvas'), ctx = canvas.getContext('2d'), video = $('video');
+        const overlay = $('overlay'), titleEl = $('title'), descEl = $('desc'), loader = $('loader'), howEl = $('how'), startBtn = $('startBtn');
+        const toAr = (n) => String(n).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[d]);
+
+        /* ---------------- القطع والمراحل ---------------- */
+        const COLS = 10, ROWS = 20;
+        const SHAPES = {
+            I: { n: 4, c: [[0, 1], [1, 1], [2, 1], [3, 1]], col: 1 },
+            O: { n: 2, c: [[0, 0], [1, 0], [0, 1], [1, 1]], col: 2 },
+            T: { n: 3, c: [[1, 0], [0, 1], [1, 1], [2, 1]], col: 3 },
+            S: { n: 3, c: [[1, 0], [2, 0], [0, 1], [1, 1]], col: 4 },
+            Z: { n: 3, c: [[0, 0], [1, 0], [1, 1], [2, 1]], col: 5 },
+            J: { n: 3, c: [[0, 0], [0, 1], [1, 1], [2, 1]], col: 6 },
+            L: { n: 3, c: [[2, 0], [0, 1], [1, 1], [2, 1]], col: 7 }
+        };
+        const KINDS = Object.keys(SHAPES);
+        const CELLCOL = [null, '#22d3ee', '#facc15', '#c084fc', '#4ade80', '#f87171', '#60a5fa', '#fb923c', '#64748b'];
+        const KICKS = [[0, 0], [-1, 0], [1, 0], [-2, 0], [2, 0], [0, -1], [-1, -1], [1, -1]];
+
+        // المراحل العشر: الاسم، لونا الخلفية
+        const THEMES = [
+            ['الغابة', '#0b2a1d', '#14532d'], ['البحر', '#082f49', '#0c4a6e'], ['الصحراء', '#3b2a0b', '#78450f'],
+            ['الثلج', '#1e293b', '#334e68'], ['البركان', '#3b0d0d', '#7f1d1d'], ['الفضاء', '#150b3a', '#312e81'],
+            ['المدينة', '#10182b', '#1e3a5f'], ['الأعماق', '#041a24', '#0f3b4a'], ['العاصفة', '#1b1b2b', '#3b3b5c'], ['القمة', '#2b0b2e', '#6b21a8']
+        ];
+        const MAX_STAGE = THEMES.length;
+        const stageGoal = (s) => 4 + s;                                       // عدد الصفوف المطلوبة
+        const stageFall = (s) => Math.max(0.11, 0.85 * Math.pow(0.84, s - 1)); // ثواني لكل صف
+        const stageGarbage = (s) => Math.min(6, Math.floor(s / 2));           // صفوف عوائق في البداية
+        const SENS = [
+            { name: 'حساس', sub: 'حركة خفيفة', lean: 8, dx: 0.45 },
+            { name: 'عادي', sub: 'مناسب للأغلبية', lean: 11, dx: 0.65 },
+            { name: 'واسع', sub: 'حركة كبيرة', lean: 15, dx: 0.9 }
+        ];
+        const PCOL = ['#22d3ee', '#f472b6'];
+        const DT = 1 / 60;
+
+        const cfg = { mode: 1, stage: 1, sens: 1 };
+        let w = 0, h = 0, lastT = performance.now(), acc = 0;
+        let phase = 'MENU';          // MENU, READY, PLAY, STAGEUP, OVER
+        let B = [], players = [], poses = [];
+        let phaseT = 0, banner = '', sub = '', stage = 1, vsTime = 0, elapsed = 0;
+        let poseStatus = 'loading';
+        GC.fitCanvas(canvas, (nw, nh) => { w = nw; h = nh; });
+
+        /* ---------------- اللوح ---------------- */
+        class Board {
+            constructor(seed) {
+                this.g = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+                this.bag = []; this.next = []; this.cur = null; this.dead = false;
+                this.score = 0; this.lines = 0; this.pending = 0; this.out = 0;
+                this.fallT = 0; this.lockT = 0; this.resets = 0; this.clearT = 0; this.clearRows = [];
+                this.mdir = 0; this.dasT = 0; this.flash = 0; this.combo = 0;
+            }
+            takeKind() {
+                if (!this.bag.length) { this.bag = KINDS.slice(); for (let i = 6; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [this.bag[i], this.bag[j]] = [this.bag[j], this.bag[i]]; } }
+                return this.bag.pop();
+            }
+            spawn() {
+                while (this.next.length < 4) this.next.push(this.takeKind());
+                const k = this.next.shift(), s = SHAPES[k];
+                this.cur = { k, n: s.n, cells: s.c.map((c) => c.slice()), x: Math.floor((COLS - s.n) / 2), y: k === 'I' ? -1 : 0 };
+                this.fallT = 0; this.lockT = 0; this.resets = 0;
+                if (this.collide(this.cur.cells, this.cur.x, this.cur.y)) { this.dead = true; this.cur.y = Math.max(-1, this.cur.y); }
+            }
+            collide(cells, x, y) {
+                for (const [cx, cy] of cells) {
+                    const gx = x + cx, gy = y + cy;
+                    if (gx < 0 || gx >= COLS || gy >= ROWS) return true;
+                    if (gy >= 0 && this.g[gy][gx]) return true;
+                }
+                return false;
+            }
+            grounded() { return this.collide(this.cur.cells, this.cur.x, this.cur.y + 1); }
+            touched() { if (this.grounded() && this.resets < 12) { this.lockT = 0; this.resets++; } }
+            move(d) {
+                const c = this.cur; if (!c || this.clearT > 0) return false;
+                if (this.collide(c.cells, c.x + d, c.y)) return false;
+                c.x += d; this.touched(); GC.beep(300, 0.04, 'square', 0.04); return true;
+            }
+            rotate(dir) {
+                const c = this.cur; if (!c || this.clearT > 0 || c.k === 'O') return false;
+                const n = c.n, cells = c.cells.map(([x, y]) => (dir > 0 ? [n - 1 - y, x] : [y, n - 1 - x]));
+                for (const [kx, ky] of KICKS) {
+                    if (!this.collide(cells, c.x + kx, c.y + ky)) { c.cells = cells; c.x += kx; c.y += ky; this.touched(); GC.beep(520, 0.06, 'triangle', 0.07); return true; }
+                }
+                return false;
+            }
+            dropDist() { let d = 0; while (!this.collide(this.cur.cells, this.cur.x, this.cur.y + d + 1)) d++; return d; }
+            hardDrop() {
+                if (!this.cur || this.clearT > 0) return;
+                const d = this.dropDist(); this.cur.y += d; this.score += d * 2;
+                GC.beep(160, 0.12, 'sawtooth', 0.1, 0, 60); this.lock();
+            }
+            lock() {
+                const c = this.cur, k = SHAPES[c.k].col;
+                for (const [cx, cy] of c.cells) { const gy = c.y + cy; if (gy >= 0) this.g[gy][c.x + cx] = k; }
+                this.cur = null;
+                const full = [];
+                for (let r = 0; r < ROWS; r++) if (this.g[r].every((v) => v)) full.push(r);
+                if (full.length) { this.clearRows = full; this.clearT = 0.3; GC.beep(660 + full.length * 110, 0.2, 'triangle', 0.12); }
+                else { this.combo = 0; this.applyPending(); GC.beep(220, 0.06, 'square', 0.06); }
+            }
+            finishClear() {
+                const n = this.clearRows.length;
+                this.g = this.g.filter((_, r) => !this.clearRows.includes(r));
+                while (this.g.length < ROWS) this.g.unshift(new Array(COLS).fill(0));
+                this.clearRows = [];
+                this.lines += n; this.combo++;
+                this.score += [0, 100, 300, 500, 800][n] * Math.max(1, this.level || 1) + (this.combo > 1 ? 50 * this.combo : 0);
+                this.out += [0, 0, 1, 2, 4][n];
+                this.flash = 0.5;
+                this.lastClear = n;
+                this.applyPending();
+            }
+            applyPending() { if (this.pending > 0) { this.addGarbage(this.pending); this.pending = 0; } }
+            addGarbage(n) {
+                const hole = Math.random() * COLS | 0;
+                for (let i = 0; i < n; i++) {
+                    if (this.g[0].some((v) => v)) this.dead = true;
+                    this.g.shift();
+                    const row = new Array(COLS).fill(8); row[hole] = 0;
+                    this.g.push(row);
+                }
+                if (this.cur && this.collide(this.cur.cells, this.cur.x, this.cur.y)) this.cur.y = Math.max(-1, this.cur.y - n);
+            }
+            update(dt, inp, fall) {
+                if (this.dead) return;
+                this.flash = Math.max(0, this.flash - dt);
+                if (this.clearT > 0) { this.clearT -= dt; if (this.clearT <= 0) this.finishClear(); return; }
+                if (!this.cur) { this.spawn(); if (this.dead) return; }
+                // الحركة الجانبية مع التكرار عند الاستمرار
+                const d = inp.dir;
+                if (d !== this.mdir) { this.mdir = d; this.dasT = 0; if (d) this.move(d); }
+                else if (d) { this.dasT += dt; if (this.dasT > 0.28) { this.dasT -= 0.13; this.move(d); } }
+                while (inp.rot.length) this.rotate(inp.rot.shift());
+                if (inp.hard) { inp.hard = false; this.hardDrop(); return; }
+                const interval = inp.soft ? Math.min(fall, 0.05) : fall;
+                this.fallT += dt;
+                while (this.fallT >= interval) {
+                    this.fallT -= interval;
+                    if (!this.collide(this.cur.cells, this.cur.x, this.cur.y + 1)) { this.cur.y++; if (inp.soft) this.score += 1; }
+                    else break;
+                }
+                if (this.grounded()) { this.lockT += dt; if (this.lockT >= (inp.soft ? 0.25 : 0.5)) this.lock(); }
+                else this.lockT = 0;
+            }
+        }
+
+        /* ---------------- اللاعبون والمدخلات ---------------- */
+        function mkPlayer(i) {
+            return {
+                i, seen: false, seenAt: 0, cur: null, base: null, calib: 0,
+                dir: 0, soft: false, armL: true, armR: true, armJ: true,
+                inp: { dir: 0, soft: false, hard: false, rot: [] },
+                flash: { L: 0, R: 0, rot: 0, rotc: 0, soft: 0, hard: 0 }, sig: 0, dy: 0
+            };
+        }
+        function leanFrom(lm, vw, vh) {
+            const L = lm[11], Rr = lm[12], deg = 180 / Math.PI;
+            const roll = -Math.atan2((L.y - Rr.y) * vh, (L.x - Rr.x) * vw) * deg;
+            const sx = (L.x + Rr.x) / 2, sy = (L.y + Rr.y) / 2;
+            const hp = lm[23], hq = lm[24];
+            if (hp && hq && hp.visibility > 0.35 && hq.visibility > 0.35) {
+                const hx = (hp.x + hq.x) / 2, hy = (hp.y + hq.y) / 2;
+                return -Math.atan2((sx - hx) * vw, (hy - sy) * vh) * deg * 0.85 + roll * 0.15;
+            }
+            const n = lm[0], swpx = Math.max(1, Math.abs(L.x - Rr.x) * vw);
+            const head = n ? -Math.atan2((n.x - sx) * vw, swpx * 0.9) * deg : 0;
+            return head * 0.6 + roll * 0.4;
+        }
+
+        /* ---------------- تتبع الجسم ---------------- */
+        const VISION_VER = '0.10.14';
+        let landmarker = null, lastVideoT = -1;
+        async function loadVision() {
+            let mod, base;
+            try { mod = await import('./vendor/tasks-vision/vision_bundle.mjs'); base = new URL('./vendor/tasks-vision/wasm', location.href).href; }
+            catch (e) {
+                mod = await import(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION_VER}/vision_bundle.mjs`);
+                base = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VISION_VER}/wasm`;
+            }
+            const fs = await mod.FilesetResolver.forVisionTasks(base);
+            const local = './vendor/models/pose_landmarker_lite.task';
+            let modelPath = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+            try { const r = await fetch(local, { method: 'HEAD' }); if (r.ok) modelPath = local; } catch (e) { /* لا يوجد ملف محلي */ }
+            const opts = (delegate) => ({
+                baseOptions: { modelAssetPath: modelPath, delegate }, runningMode: 'VIDEO', numPoses: 2,
+                minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5
+            });
+            try { return await mod.PoseLandmarker.createFromOptions(fs, opts('GPU')); }
+            catch (e) { return await mod.PoseLandmarker.createFromOptions(fs, opts('CPU')); }
+        }
+        async function initPose() {
+            if (new URLSearchParams(location.search).has('sim')) { poseStatus = 'sim'; return readyMenu(); }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { poseStatus = 'failed'; return readyMenu(); }
+            try {
+                landmarker = await loadVision();
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+                video.srcObject = stream;
+                await video.play();
+                poseStatus = 'ok';
+            } catch (e) { console.error(e); poseStatus = 'failed'; }
+            readyMenu();
+        }
+
+        function detect(now) {
+            if (poseStatus !== 'ok' || !landmarker || video.readyState < 2 || video.currentTime === lastVideoT) return;
+            lastVideoT = video.currentTime;
+            let res;
+            try { res = landmarker.detectForVideo(video, now); } catch (e) { return; }
+            const vw = video.videoWidth, vh = video.videoHeight, nP = cfg.mode;
+            let list = (res.landmarks || [])
+                .filter((lm) => lm[11] && lm[12] && lm[11].visibility > 0.4 && lm[12].visibility > 0.4)
+                .map((lm) => ({ lm, cx: 1 - (lm[11].x + lm[12].x) / 2, sw: Math.abs(lm[11].x - lm[12].x) }));
+            let assigned;
+            if (nP === 1) assigned = [list.length ? list.reduce((a, b) => (b.sw > a.sw ? b : a)) : null];
+            else {
+                assigned = [null, null];
+                list = list.sort((a, b) => b.sw - a.sw).slice(0, 2).sort((a, b) => a.cx - b.cx);
+                if (list.length === 2) assigned = list;
+                else if (list.length === 1) assigned[list[0].cx < 0.5 ? 0 : 1] = list[0];
+            }
+            poses = assigned.map((a) => (a ? a.lm : null));
+            assigned.forEach((a, i) => {
+                const p = players[i]; if (!p || !a) return;
+                const lm = a.lm, L = lm[11], Rr = lm[12];
+                const swpx = Math.max(20, Math.abs(L.x - Rr.x) * vw);
+                const raw = {
+                    lean: leanFrom(lm, vw, vh), cx: a.cx * vw, sy: ((L.y + Rr.y) / 2) * vh, swpx,
+                    upR: lm[16] && lm[16].visibility > 0.5 ? (((L.y + Rr.y) / 2 - lm[16].y) * vh) / swpx : -9,   // اليد اليمنى للاعب
+                    upL: lm[15] && lm[15].visibility > 0.5 ? (((L.y + Rr.y) / 2 - lm[15].y) * vh) / swpx : -9
+                };
+                if (!p.cur) p.cur = raw;
+                else {
+                    const k = 0.5;
+                    p.cur.lean += (raw.lean - p.cur.lean) * k; p.cur.cx += (raw.cx - p.cur.cx) * k;
+                    p.cur.sy += (raw.sy - p.cur.sy) * 0.6; p.cur.swpx += (raw.swpx - p.cur.swpx) * 0.3;
+                    p.cur.upR = raw.upR; p.cur.upL = raw.upL;
+                }
+                p.seenAt = now;
+            });
+        }
+
+        /* ---------------- لوحة المفاتيح واللمس (احتياط) ---------------- */
+        const KS = [
+            { l: 'KeyA', r: 'KeyD', rot: 'KeyW', rotc: 'KeyQ', soft: 'KeyS', hard: 'Space' },
+            { l: 'ArrowLeft', r: 'ArrowRight', rot: 'ArrowUp', rotc: 'KeyZ', soft: 'ArrowDown', hard: 'Enter' }
+        ];
+        const allKeys = new Set(KS.flatMap((k) => Object.values(k)));
+        const keyDown = new Set();
+        window.addEventListener('keydown', (e) => {
+            if (!allKeys.has(e.code) || phase === 'MENU') return;
+            e.preventDefault(); e.stopPropagation();
+            if (e.repeat) return;
+            keyDown.add(e.code);
+            // ضغطات لمرة واحدة: التدوير والإسقاط
+            const sets = cfg.mode === 1 ? [[0, KS[0]], [0, KS[1]]] : [[0, KS[0]], [1, KS[1]]];
+            sets.forEach(([pi, k]) => {
+                const p = players[pi]; if (!p || phase !== 'PLAY') return;
+                if (e.code === k.rot) { p.inp.rot.push(1); p.flash.rot = performance.now(); }
+                if (e.code === k.rotc) { p.inp.rot.push(-1); p.flash.rotc = performance.now(); }
+                if (e.code === k.hard) { p.inp.hard = true; p.flash.hard = performance.now(); }
+            });
+        }, true);
+        window.addEventListener('keyup', (e) => { keyDown.delete(e.code); });
+        window.addEventListener('blur', () => { keyDown.clear(); touch.dir = 0; touch.soft = false; });
+        const touch = { dir: 0, soft: false };
+        window.addEventListener('pointerdown', (e) => {
+            if (phase === 'MENU' || (e.target.closest && e.target.closest('button, .overlay, #remote-back-btn'))) return;
+            const p = players[0]; if (!p) return;
+            const fx = e.clientX / w, fy = e.clientY / h;
+            if (fx < 0.33) touch.dir = -1; else if (fx > 0.67) touch.dir = 1;
+            else if (fy < 0.6) { if (phase === 'PLAY') p.inp.rot.push(1); }
+            else if (phase === 'PLAY') p.inp.hard = true;
+        });
+        const clearTouch = () => { touch.dir = 0; touch.soft = false; };
+        window.addEventListener('pointerup', clearTouch);
+        window.addEventListener('pointercancel', clearTouch);
+
+        /* ---------------- تحويل الجسم إلى أوامر ---------------- */
+        function processInput(p, now, dt) {
+            const sens = SENS[cfg.sens], inp = p.inp;
+            const ks = cfg.mode === 1 ? [KS[0], KS[1]] : [KS[p.i]];
+            let kd = 0, ksoft = false;
+            ks.forEach((k) => { kd += (keyDown.has(k.r) ? 1 : 0) - (keyDown.has(k.l) ? 1 : 0); if (keyDown.has(k.soft)) ksoft = true; });
+            if (p.i === 0 && !kd) kd = touch.dir;
+            p.seen = !!(p.cur && now - p.seenAt < 600);
+            let dir = 0, soft = false;
+            if (p.seen && p.cur) {
+                const c = p.cur;
+                if (!p.base) p.base = { lean: c.lean, cx: c.cx, sy: c.sy, swpx: c.swpx };
+                const b = p.base;
+                if (phase === 'READY') {          // معايرة: وقفتك الحالية هي «المحايد»
+                    b.lean += (c.lean - b.lean) * 0.1; b.cx += (c.cx - b.cx) * 0.1; b.sy += (c.sy - b.sy) * 0.1; b.swpx += (c.swpx - b.swpx) * 0.1;
+                }
+                const sig = (c.lean - b.lean) / sens.lean + ((c.cx - b.cx) / b.swpx) / sens.dx;
+                const dy = (c.sy - b.sy) / b.swpx;
+                p.sig = sig; p.dy = dy;
+                if (phase === 'PLAY') {
+                    // اتجاه بتباطؤ (hysteresis)
+                    if (p.dir === 0 && Math.abs(sig) > 1) p.dir = Math.sign(sig);
+                    else if (p.dir !== 0 && (Math.abs(sig) < 0.55 || Math.sign(sig) !== p.dir)) p.dir = Math.abs(sig) > 1 ? Math.sign(sig) : 0;
+                    dir = p.dir;
+                    // جلوس = نزول سريع
+                    if (!p.soft && dy > 0.5) p.soft = true; else if (p.soft && dy < 0.25) p.soft = false;
+                    soft = p.soft;
+                    // قفز = إسقاط فوري
+                    if (p.armJ && dy < -0.42) { p.armJ = false; inp.hard = true; p.flash.hard = now; }
+                    else if (!p.armJ && dy > -0.15) p.armJ = true;
+                    // رفع اليد = تدوير
+                    if (p.armR && c.upR > 0.55) { p.armR = false; inp.rot.push(1); p.flash.rot = now; }
+                    else if (!p.armR && c.upR < 0.05) p.armR = true;
+                    if (p.armL && c.upL > 0.55) { p.armL = false; inp.rot.push(-1); p.flash.rotc = now; }
+                    else if (!p.armL && c.upL < 0.05) p.armL = true;
+                    // انجراف المعايرة البطيء عند الوقوف المحايد
+                    if (Math.abs(sig) < 0.4 && Math.abs(dy) < 0.25) {
+                        b.lean += (c.lean - b.lean) * 0.004; b.cx += (c.cx - b.cx) * 0.004; b.sy += (c.sy - b.sy) * 0.01; b.swpx += (c.swpx - b.swpx) * 0.004;
+                    }
+                }
+            } else { p.dir = 0; p.soft = false; }
+            if (kd) dir = kd;
+            if (ksoft || touch.soft) soft = true;
+            if (dir !== inp.dir) { if (dir < 0) p.flash.L = now; else if (dir > 0) p.flash.R = now; }
+            if (soft && !inp.soft) p.flash.soft = now;
+            inp.dir = dir; inp.soft = soft;
+            if (phase !== 'PLAY') { inp.rot.length = 0; inp.hard = false; }
+        }
+
+        /* ---------------- سير اللعبة ---------------- */
+        function startGame() {
+            GC.audioInit();
+            const nP = cfg.mode;
+            players = []; B = [];
+            for (let i = 0; i < nP; i++) { players.push(mkPlayer(i)); B.push(new Board()); }
+            stage = cfg.mode === 1 ? cfg.stage : 1; vsTime = 0; elapsed = 0;
+            beginStage(true);
+            overlay.classList.add('hidden');
+        }
+        function beginStage(first) {
+            B.forEach((b) => {
+                b.g = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+                b.cur = null; b.clearT = 0; b.clearRows = []; b.pending = 0; b.fallT = 0; b.dead = false; b.level = stage; b.mdir = 0;
+                if (cfg.mode === 1) { b.lines = 0; if (stageGarbage(stage)) b.addGarbage(stageGarbage(stage)); }
+            });
+            players.forEach((p) => { p.inp = { dir: 0, soft: false, hard: false, rot: [] }; p.dir = 0; p.soft = false; });
+            phase = 'READY'; phaseT = first ? 200 : 150;
+        }
+        function fallFor(i) {
+            if (cfg.mode === 1) return stageFall(stage);
+            return Math.max(0.1, 0.8 * Math.pow(0.9, Math.floor(vsTime / 25)));
+        }
+        function tick(now) {
+            players.forEach((p) => processInput(p, now, DT));
+            if (phase === 'READY') {
+                if (phaseT % 60 === 0 && phaseT > 0) GC.beep(440, 0.1, 'square', 0.1);
+                if (--phaseT <= 0) { phase = 'PLAY'; GC.beep(880, 0.3, 'square', 0.14); }
+                return;
+            }
+            if (phase === 'STAGEUP') {
+                if (--phaseT <= 0) { stage++; beginStage(false); }
+                return;
+            }
+            if (phase === 'OVER') { if (--phaseT <= 0) endToMenu(); return; }
+            if (phase !== 'PLAY') return;
+            elapsed += DT;
+            if (cfg.mode === 2) { vsTime += DT; B.forEach((b) => { b.level = 1 + Math.floor(vsTime / 25); }); }
+            B.forEach((b, i) => b.update(DT, players[i].inp, fallFor(i)));
+            if (cfg.mode === 2) {
+                B.forEach((b, i) => { if (b.out) { B[1 - i].pending += b.out; b.out = 0; } });
+                const d0 = B[0].dead, d1 = B[1].dead;
+                if (d0 || d1) endGame(d0 && d1 ? -1 : (d0 ? 1 : 0));
+            } else {
+                const b = B[0];
+                if (b.dead) return endGame(-1);
+                if (b.lines >= stageGoal(stage)) {
+                    GC.beep(660, 0.15, 'triangle', 0.14); GC.beep(990, 0.15, 'triangle', 0.14, 0.14); GC.beep(1320, 0.3, 'triangle', 0.14, 0.28);
+                    b.score += 500 * stage;
+                    if (stage >= MAX_STAGE) return endGame(0, true);
+                    GC.store.set('tet_stage', Math.max(GC.store.get('tet_stage'), stage + 1));
+                    banner = `✅ أنهيت المرحلة ${toAr(stage)}`; sub = `التالية: ${THEMES[stage][0]}`;
+                    phase = 'STAGEUP'; phaseT = 170;
+                }
+            }
+        }
+        let result = null;
+        function endGame(winner, won) {
+            GC.beep(200, 0.5, 'sawtooth', 0.14, 0, 60);
+            result = { winner, won };
+            phase = 'OVER'; phaseT = 150;
+        }
+
+        /* ---------------- القائمة ---------------- */
+        function buildRow(el, items, cur, onPick) {
+            el.innerHTML = '';
+            items.forEach((it, i) => {
+                const b = document.createElement('button');
+                b.className = 'opt' + (i === cur ? ' sel' : '');
+                b.innerHTML = it.sub ? `${it.label}<small>${it.sub}</small>` : it.label;
+                b.addEventListener('click', () => { onPick(i); renderRows(); });
+                el.appendChild(b);
+            });
+        }
+        function renderRows() {
+            buildRow($('modeRow'), [{ label: '👤 لاعب واحد', sub: '١٠ مراحل' }, { label: '👥 لاعبان', sub: 'مواجهة وإرسال صفوف' }], cfg.mode - 1, (i) => { cfg.mode = i + 1; });
+            const reach = Math.max(1, Math.min(MAX_STAGE, GC.store.get('tet_stage') || 1));
+            const stages = [1, 3, 5, 7].filter((s) => s === 1 || s <= reach);
+            if (!stages.includes(cfg.stage)) cfg.stage = 1;
+            $('g2').classList.toggle('hidden', cfg.mode !== 1 || startBtn.classList.contains('hidden'));
+            buildRow($('stageRow'), stages.map((s) => ({ label: toAr(s), sub: THEMES[s - 1][0] })), stages.indexOf(cfg.stage), (i) => { cfg.stage = stages[i]; });
+            buildRow($('sensRow'), SENS.map((s) => ({ label: s.name, sub: s.sub })), cfg.sens, (i) => { cfg.sens = i; });
+        }
+        function readyMenu(keepText) {
+            loader.classList.add('hidden');
+            howEl.classList.remove('hidden');
+            ['g1', 'g3', 'startBtn'].forEach((id) => $(id).classList.remove('hidden'));
+            if (!keepText) {
+                titleEl.textContent = '🧱 تتريس الجسم';
+                descEl.innerHTML = poseStatus === 'ok' || poseStatus === 'sim'
+                    ? 'رتّب القطع الساقطة لتكوين صفوف كاملة! <b>قف وحدك أمام الكاميرا</b> على بعد نحو مترين (يظهر جسمك من الرأس إلى الورك على الأقل). في وضع اللاعبين: <b>الأول على يسار الكاميرا</b>. أنهِ المراحل العشر!'
+                    : 'تعذّر تشغيل الكاميرا أو تتبع الجسم. المفاتيح: لاعب ١ (A D تحريك · W تدوير · S نزول · مسافة إسقاط) · لاعب ٢ (الأسهم · ↑ تدوير · Enter إسقاط) أو لمس الشاشة.';
+            }
+            renderRows();
+            overlay.classList.remove('hidden');
+        }
+        startBtn.addEventListener('click', startGame);
+        function endToMenu() {
+            phase = 'MENU';
+            if (cfg.mode === 1) {
+                const sc = B[0].score, best = GC.store.get('tet_best');
+                if (sc > best) GC.store.set('tet_best', sc);
+                titleEl.textContent = result.won ? '🏆 أنهيت كل المراحل!' : `🧱 انتهت اللعبة عند المرحلة ${toAr(stage)}`;
+                descEl.textContent = `النقاط: ${toAr(sc)} — الصفوف: ${toAr(B[0].lines)}${sc > best ? ' — 🏆 رقم قياسي جديد!' : ' — الأفضل: ' + toAr(Math.max(best, sc))}`;
+            } else {
+                titleEl.textContent = result.winner < 0 ? 'تعادل!' : `🏆 فاز لاعب ${toAr(result.winner + 1)}!`;
+                descEl.textContent = `النقاط: ${toAr(B[0].score)} مقابل ${toAr(B[1].score)}`;
+            }
+            startBtn.textContent = 'العب مجدداً';
+            readyMenu(true);
+        }
+
+        /* ---------------- الرسم ---------------- */
+        function txt(s, x, y, size, color, glow, align) {
+            ctx.textAlign = align || 'center'; ctx.textBaseline = 'middle';
+            ctx.font = `bold ${size}px Tahoma, sans-serif`;
+            if (glow) { ctx.shadowColor = glow; ctx.shadowBlur = size * 0.4; }
+            ctx.fillStyle = color; ctx.fillText(s, x, y); ctx.shadowBlur = 0;
+        }
+        function rrect(x, y, rw, rh, r) { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, rw, rh, r) : ctx.rect(x, y, rw, rh); }
+        function cell(x, y, cs, idx, alpha) {
+            const col = CELLCOL[idx]; if (!col) return;
+            ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+            ctx.fillStyle = col; rrect(x + 1, y + 1, cs - 2, cs - 2, cs * 0.18); ctx.fill();
+            ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fillRect(x + 3, y + 3, cs - 6, Math.max(2, cs * 0.14));
+            ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(x + 3, y + cs - 3 - Math.max(2, cs * 0.12), cs - 6, Math.max(2, cs * 0.12));
+            ctx.globalAlpha = 1;
+        }
+        function miniPiece(k, cx, cy, cs) {
+            const s = SHAPES[k], col = s.col;
+            const minx = Math.min(...s.c.map((c) => c[0])), maxx = Math.max(...s.c.map((c) => c[0]));
+            const miny = Math.min(...s.c.map((c) => c[1])), maxy = Math.max(...s.c.map((c) => c[1]));
+            const ox = cx - ((maxx - minx + 1) * cs) / 2, oy = cy - ((maxy - miny + 1) * cs) / 2;
+            s.c.forEach(([x, y]) => cell(ox + (x - minx) * cs, oy + (y - miny) * cs, cs, col));
+        }
+
+        function drawBoard(b, x, y, cs, p, now) {
+            ctx.fillStyle = 'rgba(4,8,18,0.82)'; rrect(x - 4, y - 4, COLS * cs + 8, ROWS * cs + 8, 8); ctx.fill();
+            ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1; ctx.beginPath();
+            for (let i = 1; i < COLS; i++) { ctx.moveTo(x + i * cs, y); ctx.lineTo(x + i * cs, y + ROWS * cs); }
+            for (let j = 1; j < ROWS; j++) { ctx.moveTo(x, y + j * cs); ctx.lineTo(x + COLS * cs, y + j * cs); }
+            ctx.stroke();
+            for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (b.g[r][c]) cell(x + c * cs, y + r * cs, cs, b.g[r][c]);
+            // وميض الصفوف المكتملة
+            if (b.clearT > 0) {
+                const a = 0.4 + 0.5 * Math.abs(Math.sin(now / 45));
+                ctx.fillStyle = `rgba(255,255,255,${a})`;
+                b.clearRows.forEach((r) => ctx.fillRect(x, y + r * cs, COLS * cs, cs));
+            }
+            // القطعة الحالية وظلها
+            if (b.cur && !b.dead) {
+                const c = b.cur, k = SHAPES[c.k].col, d = b.dropDist();
+                c.cells.forEach(([cx, cy]) => { if (c.y + cy + d >= 0) { ctx.strokeStyle = CELLCOL[k]; ctx.globalAlpha = 0.5; ctx.lineWidth = 2; rrect(x + (c.x + cx) * cs + 3, y + (c.y + cy + d) * cs + 3, cs - 6, cs - 6, 4); ctx.stroke(); ctx.globalAlpha = 1; } });
+                c.cells.forEach(([cx, cy]) => { if (c.y + cy >= 0) cell(x + (c.x + cx) * cs, y + (c.y + cy) * cs, cs, k); });
+            }
+            // صفوف العوائق القادمة
+            if (b.pending > 0) { ctx.fillStyle = '#ef4444'; ctx.fillRect(x - 9, y + (ROWS - Math.min(ROWS, b.pending)) * cs, 4, Math.min(ROWS, b.pending) * cs); }
+            if (b.flash > 0 && b.lastClear >= 2) txt(['', '', 'مزدوج!', 'ثلاثي!', 'تتريس!'][b.lastClear], x + COLS * cs / 2, y + ROWS * cs * 0.35 - (0.5 - b.flash) * 40, cs * 1.2, '#fde047', '#000');
+            if (b.dead) { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x, y, COLS * cs, ROWS * cs); txt('💀', x + COLS * cs / 2, y + ROWS * cs / 2, cs * 2); }
+            ctx.strokeStyle = p !== undefined ? PCOL[p] : '#22d3ee'; ctx.lineWidth = 2; ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 10;
+            rrect(x - 4, y - 4, COLS * cs + 8, ROWS * cs + 8, 8); ctx.stroke(); ctx.shadowBlur = 0;
+            if (p !== undefined && players[p] && poseStatus === 'ok' && !players[p].seen && (phase === 'PLAY' || phase === 'READY')) {
+                ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y + ROWS * cs * 0.45, COLS * cs, cs * 1.6);
+                txt('⚠ قف أمام الكاميرا', x + COLS * cs / 2, y + ROWS * cs * 0.45 + cs * 0.8, cs * 0.75, '#fca5a5');
+            }
+        }
+
+        const BONES = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
+        function drawPip(x, y, pw) {
+            const ph = pw * 0.75;
+            ctx.save();
+            rrect(x, y, pw, ph, 8); ctx.clip();
+            ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x, y, pw, ph);
+            if (poseStatus === 'ok' && video.videoWidth) {
+                ctx.save(); ctx.translate(x + pw, y); ctx.scale(-1, 1);
+                ctx.globalAlpha = 0.6; ctx.drawImage(video, 0, 0, pw, ph); ctx.restore(); ctx.globalAlpha = 1;
+            }
+            poses.forEach((lm, i) => {
+                if (!lm) return;
+                ctx.strokeStyle = PCOL[i]; ctx.lineWidth = 3; ctx.beginPath();
+                BONES.forEach(([a, b]) => { if (lm[a] && lm[b]) { ctx.moveTo(x + (1 - lm[a].x) * pw, y + lm[a].y * ph); ctx.lineTo(x + (1 - lm[b].x) * pw, y + lm[b].y * ph); } });
+                ctx.stroke();
+            });
+            ctx.restore();
+            ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2; rrect(x, y, pw, ph, 8); ctx.stroke();
+            return ph;
+        }
+        // مؤشرات الأوامر: تضيء عند التقاط الحركة
+        function drawActs(p, x, y, aw, now) {
+            const items = [['◀', 'L'], ['▶', 'R'], ['↻', 'rot'], ['↺', 'rotc'], ['⤓', 'soft'], ['⏬', 'hard']];
+            const cw = aw / items.length;
+            items.forEach(([ic, k], i) => {
+                const on = now - p.flash[k] < 220 || (k === 'soft' && p.inp.soft) || (k === 'L' && p.inp.dir < 0) || (k === 'R' && p.inp.dir > 0);
+                ctx.fillStyle = on ? PCOL[p.i] : 'rgba(255,255,255,0.1)'; rrect(x + i * cw + 2, y, cw - 4, cw * 0.8, 6); ctx.fill();
+                txt(ic, x + i * cw + cw / 2, y + cw * 0.42, cw * 0.5, on ? '#04222b' : '#94a3b8');
+            });
+        }
+
+        function drawBackground(now) {
+            const th = THEMES[(cfg.mode === 1 ? stage : 1 + Math.floor(vsTime / 25) % MAX_STAGE) - 1] || THEMES[0];
+            const g = ctx.createLinearGradient(0, 0, 0, h);
+            g.addColorStop(0, th[1]); g.addColorStop(1, th[2]);
+            ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = 'rgba(255,255,255,0.05)';
+            for (let i = 0; i < 24; i++) { const px = (i * 173.3 + now * 0.01 * (1 + i % 3)) % w, py = (i * 97.7 + now * 0.006 * (1 + i % 4)) % h; ctx.beginPath(); ctx.arc(px, py, 2 + i % 4, 0, 7); ctx.fill(); }
+            ctx.fillStyle = 'rgba(4,8,18,0.5)'; ctx.fillRect(0, 0, w, h);
+        }
+
+        function draw(now) {
+            GC.begin(ctx);
+            ctx.fillStyle = '#070b16'; ctx.fillRect(0, 0, w, h);
+            if (phase === 'MENU') return;
+            drawBackground(now);
+            if (cfg.mode === 1) drawSingle(now); else drawVersus(now);
+            const cx = w / 2, cy = h * 0.5, big = Math.max(40, Math.min(w, h) * 0.15);
+            if (phase === 'READY') {
+                const n = Math.ceil(phaseT / 60);
+                ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, cy - big * 0.9, w, big * 1.8);
+                txt(n > 3 ? 'استعد' : String(n), cx, cy - big * 0.15, big, '#fde047', '#000');
+                const t = cfg.mode === 1 ? `المرحلة ${toAr(stage)}: ${THEMES[stage - 1][0]} — الهدف ${toAr(stageGoal(stage))} صفوف` : 'قفا بوضع مستقيم';
+                txt(t, cx, cy + big * 0.55, Math.max(14, big * 0.22), '#fff', '#000');
+            } else if (phase === 'STAGEUP') {
+                ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, cy - big * 0.8, w, big * 1.6);
+                txt(banner, cx, cy - big * 0.15, Math.max(26, big * 0.5), '#4ade80', '#000');
+                txt(sub, cx, cy + big * 0.4, Math.max(14, big * 0.22), '#fff');
+            } else if (phase === 'OVER') {
+                ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, cy - big * 0.7, w, big * 1.4);
+                const t = cfg.mode === 2 ? (result.winner < 0 ? 'تعادل!' : `🏆 فاز لاعب ${toAr(result.winner + 1)}!`) : (result.won ? '🏆 أنهيت كل المراحل!' : 'انتهت اللعبة');
+                txt(t, cx, cy, Math.max(28, big * 0.55), '#fff', '#22d3ee');
+            }
+        }
+
+        function drawSingle(now) {
+            const b = B[0], p = players[0];
+            const portrait = w < h * 0.95;
+            let cs, bx, by;
+            if (!portrait) {
+                cs = Math.floor(Math.min((h - 28) / ROWS, w * 0.3 / COLS * 1.4));
+                bx = Math.round((w - COLS * cs) / 2); by = Math.round((h - ROWS * cs) / 2);
+            } else {
+                cs = Math.floor(Math.min((h * 0.72) / ROWS, (w * 0.92) / COLS));
+                bx = Math.round((w - COLS * cs) / 2); by = Math.round(h * 0.15);
+            }
+            drawBoard(b, bx, by, cs, 0, now);
+            const th = THEMES[stage - 1], goal = stageGoal(stage);
+            const best = GC.store.get('tet_best');
+            if (!portrait) {
+                const pw = Math.min(250, bx - 30), lx = bx - 20 - pw, rx = bx + COLS * cs + 20;
+                if (pw > 110) {
+                    // لوحة معلومات المرحلة
+                    ctx.fillStyle = 'rgba(4,8,18,0.7)'; rrect(lx, by, pw, ROWS * cs, 12); ctx.fill();
+                    txt(`المرحلة ${toAr(stage)} / ${toAr(MAX_STAGE)}`, lx + pw / 2, by + 28, Math.min(22, pw * 0.1), '#22d3ee');
+                    txt(th[0], lx + pw / 2, by + 58, Math.min(26, pw * 0.12), '#fff');
+                    const barW = pw - 36;
+                    ctx.fillStyle = 'rgba(255,255,255,0.12)'; rrect(lx + 18, by + 84, barW, 14, 7); ctx.fill();
+                    ctx.fillStyle = '#4ade80'; rrect(lx + 18, by + 84, Math.max(8, barW * Math.min(1, b.lines / goal)), 14, 7); ctx.fill();
+                    txt(`${toAr(Math.min(b.lines, goal))} / ${toAr(goal)} صفوف`, lx + pw / 2, by + 116, Math.min(17, pw * 0.08), '#cbd5e1');
+                    txt('النقاط', lx + pw / 2, by + 160, 15, '#94a3b8');
+                    txt(toAr(b.score), lx + pw / 2, by + 190, Math.min(34, pw * 0.15), '#fde047');
+                    txt(`الأفضل: ${toAr(best)}`, lx + pw / 2, by + 224, 14, '#94a3b8');
+                }
+                const nw = Math.min(250, w - rx - 14);
+                if (nw > 110) {
+                    ctx.fillStyle = 'rgba(4,8,18,0.7)'; rrect(rx, by, nw, cs * 7.2, 12); ctx.fill();
+                    txt('التالي', rx + nw / 2, by + 20, 15, '#94a3b8');
+                    for (let i = 0; i < 3; i++) miniPiece(b.next[i] || 'I', rx + nw / 2, by + 20 + cs * (1.6 + i * 1.9), Math.min(cs * 0.7, 24));
+                    const py = by + cs * 7.6, ph = drawPip(rx, py, nw);
+                    drawActs(p, rx, py + ph + 8, nw, now);
+                }
+            } else {
+                const hs = h * 0.13;
+                txt(`المرحلة ${toAr(stage)}: ${th[0]}`, w * 0.5, hs * 0.28, Math.min(22, w * 0.05), '#22d3ee');
+                txt(`${toAr(b.score)} نقطة · ${toAr(Math.min(b.lines, goal))}/${toAr(goal)} صفوف`, w * 0.5, hs * 0.62, Math.min(16, w * 0.04), '#fde047');
+                if (b.next[0]) miniPiece(b.next[0], w * 0.9, hs * 0.5, Math.min(cs * 0.6, 20));
+                const pw = Math.min(w * 0.4, 200), py = by + ROWS * cs + 8;
+                if (py + pw * 0.75 < h) { const ph = drawPip(w / 2 - pw / 2, py, pw); if (py + ph + pw / 6 * 0.8 + 8 < h) drawActs(p, w / 2 - pw / 2, py + ph + 6, pw, now); }
+            }
+        }
+
+        function drawVersus(now) {
+            const cs = Math.floor(Math.min((h - 60) / ROWS, (w - 270) / (2 * COLS)));
+            const colW = Math.max(220, Math.min(300, w - 2 * COLS * cs - 48));
+            const total = 2 * COLS * cs + colW + 48, x0 = Math.round((w - total) / 2);
+            const by = Math.round((h - ROWS * cs) / 2 + 14);
+            const b1x = x0 + 8, cx0 = b1x + COLS * cs + 20, b2x = cx0 + colW + 20;
+            [0, 1].forEach((i) => {
+                const bx = i === 0 ? b1x : b2x;
+                drawBoard(B[i], bx, by, cs, i, now);
+                txt(`لاعب ${toAr(i + 1)}`, bx + 60, by - 16, 17, PCOL[i], undefined, 'center');
+                txt(toAr(B[i].score), bx + COLS * cs - 40, by - 16, 17, '#fde047');
+            });
+            const pw = colW, ph = drawPip(cx0, by, pw);
+            const half = (colW - 10) / 2;
+            [0, 1].forEach((i) => {
+                const px = cx0 + i * (half + 10), py = by + ph + 12;
+                ctx.fillStyle = 'rgba(4,8,18,0.7)'; rrect(px, py, half, 110, 10); ctx.fill();
+                txt('التالي', px + half / 2, py + 14, 13, PCOL[i]);
+                if (B[i].next[0]) miniPiece(B[i].next[0], px + half / 2, py + 64, Math.min(cs * 0.7, 22));
+                drawActs(players[i], px, py + 122, half, now);
+            });
+            txt(`⏱ ${toAr(Math.floor(vsTime))} ث · سرعة ${toAr(1 + Math.floor(vsTime / 25))}`, cx0 + colW / 2, by + ph + 12 + 122 + half / 6 * 0.8 + 36, 15, '#cbd5e1');
+            txt('امسح ٢+ صفوف لترسل عوائق للخصم', cx0 + colW / 2, by + ROWS * cs - 10, 14, '#94a3b8');
+        }
+
+        function loop(now) {
+            const dt = Math.min((now - lastT) / 1000, 0.1);
+            lastT = now;
+            detect(now);
+            if (phase !== 'MENU') {
+                acc += dt;
+                let n = 0;
+                while (acc >= DT && n < 6) { tick(now); acc -= DT; n++; }
+                if (n === 6) acc = 0;
+            } else acc = 0;
+            draw(now);
+            requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+        initPose();
+
+        // واجهة للاختبار الآلي (?sim=1)
+        window.TETRIS = {
+            cfg, startGame, SENS,
+            get B() { return B; }, get players() { return players; }, get phase() { return phase; }, get stage() { return stage; },
+            step(n = 1) { for (let i = 0; i < n; i++) tick(performance.now()); draw(performance.now()); },
+            key(code) { window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true })); window.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true })); },
+            holdKey(code, on) { if (on) window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true })); else window.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true })); }
+        };
+    </script>
+    <script src="remote-nav.js"></script>
+</body>
+</html>
