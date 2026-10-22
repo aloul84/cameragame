@@ -95,6 +95,10 @@
       position: absolute; top: 14px; left: 14px; padding: 3px 12px; border-radius: 999px; font-size: 0.72rem; font-weight: 800;
       background: var(--c); color: #04141a; opacity: 0; transform: translateY(-6px); transition: all 0.5s 0.15s;
     }
+    .acc-badge {
+      position: absolute; top: 12px; left: 12px; padding: 3px 11px; border-radius: 999px; font-size: 0.7rem; font-weight: 800;
+      background: #e0f2fe; color: #0c4a6e; border: 1px solid #7dd3fc; box-shadow: 0 2px 10px rgba(56,189,248,0.4);
+    }
     .card.active .badge { opacity: 1; transform: none; }
     .card.launching { transition: transform 0.55s cubic-bezier(.5,0,.2,1), opacity 0.55s ease !important; transform: translateZ(300px) scale(2.4) !important; opacity: 0 !important; }
 
@@ -177,10 +181,31 @@
     (function () {
       var GAMES = [
         ['arena.html', '⚡', 'صدام الطاقة', 'FATH ARENA', '#2ee6c5'],
+        ['pinball.html', '🎯', 'بينبول', 'بالقبضة', '#f0abfc'],
         ['adventure-run.html', '🦸', 'مغامرة فذ', '٥ مراحل', '#fbbf24'],
         ['galaxy-fighter.html', '🚀', 'مقاتل المجرة', '١٠ مراحل', '#a78bfa'],
         ['body-tetris.html', '🧱', 'تتريس الجسم', '١٠ مراحل', '#22d3ee'],
         ['curve-fight.html', '🌀', 'معركة المنحنيات', '١–٤ لاعبين', '#fb7185'],
+        ['acc-body-parts.html', '🧍', 'أعضاء الجسم', 'حركة ونطق', '#38bdf8'],
+        ['acc-open-box.html', '🎁', 'افتح الصندوق', 'حركة ونطق', '#f472b6'],
+        ['acc-word-hunt.html', '🎯', 'صيد الكلمات', 'حركة ونطق', '#4ade80'],
+        ['acc-whats-missing.html', '🧩', 'ما الناقص؟', 'حركة ونطق', '#fb923c'],
+        ['acc-move-sound.html', '👂', 'حركة وصوت', 'حركة ونطق', '#a78bfa'],
+        ['acc-order-story.html', '📚', 'رتّب القصة', 'حركة ونطق', '#4ade80'],
+        ['acc-draw-letter.html', '✍️', 'ارسم الحرف', 'حركة ونطق', '#38bdf8'],
+        ['acc-whats-wrong.html', '🔎', 'أين الخطأ؟', 'حركة ونطق', '#38bdf8'],
+        ['acc-motor-memory.html', '🧠', 'ذاكرة حركية', 'حركة ونطق', '#fbbf24'],
+        ['acc-detective.html', '🕵️', 'المحقق الصغير', 'حركة ونطق', '#f59e0b'],
+        ['acc-listen-speak.html', '🧺', 'استمع ثم تكلّم', 'حركة ونطق', '#f472b6'],
+        ['acc-little-actor.html', '🛒', 'الممثل الصغير', 'حركة ونطق', '#34d399'],
+        ['acc-broken-word.html', '🔤', 'الكلمة المكسورة', 'حركة ونطق', '#60a5fa'],
+        ['acc-dont-move.html', '🚦', 'لا تتحرّك', 'حركة ونطق', '#22c55e'],
+        ['acc-one-signal.html', '☝️', 'إشارة واحدة', 'حركة ونطق', '#fb7185'],
+        ['acc-leader.html', '👑', 'لعبة القائد', 'حركة ونطق', '#facc15'],
+        ['acc-change-rule.html', '🔀', 'تغيّرت القاعدة', 'حركة ونطق', '#c084fc'],
+        ['acc-shapes-home.html', '🏠', 'أشكال في بيتي', 'حركة ونطق', '#a3e635'],
+        ['acc-sort-treasures.html', '💎', 'صنّف الكنوز', 'حركة ونطق', '#fbbf24'],
+        ['acc-build-city.html', '🏘️', 'ابنِ مدينة', 'حركة ونطق', '#f87171'],
         ['arabic-letters.html', '🅰️', 'حروف عربية', 'تعليمي', '#4cc9f0'],
         ['word-builder.html', '🔤', 'بنّاء الكلمات', 'تعليمي', '#38bdf8'],
         ['balance-duel.html', '⚖️', 'ميزان التحدي', 'لاعبان', '#fbbf24'],
@@ -202,7 +227,8 @@
         ['race-with-sound.html', '🏎️', 'سباق مع الصوت', 'سباق', '#fb923c'],
         ['twins-simulator.html', '👯‍♂️', 'محاكي التوأم', 'استوديو', '#22d3ee']
       ];
-      var NEW = { 'arena.html': 1, 'curve-fight.html': 1, 'body-tetris.html': 1, 'galaxy-fighter.html': 1, 'adventure-run.html': 1, 'treasure-compass.html': 1, 'simon-says.html': 1, 'light-lab.html': 1, 'move-math.html': 1, 'connect-dots.html': 1, 'emotion-mirror.html': 1 };
+      var NEW = { 'arena.html': 1, 'pinball.html': 1, 'curve-fight.html': 1, 'body-tetris.html': 1, 'galaxy-fighter.html': 1, 'adventure-run.html': 1, 'treasure-compass.html': 1, 'simon-says.html': 1, 'light-lab.html': 1, 'move-math.html': 1, 'connect-dots.html': 1, 'emotion-mirror.html': 1 };
+var ACC = {'acc-body-parts.html': 1, 'acc-open-box.html': 1, 'acc-word-hunt.html': 1, 'acc-whats-missing.html': 1, 'acc-move-sound.html': 1, 'acc-order-story.html': 1, 'acc-draw-letter.html': 1, 'acc-whats-wrong.html': 1, 'acc-motor-memory.html': 1, 'acc-detective.html': 1, 'acc-listen-speak.html': 1, 'acc-little-actor.html': 1, 'acc-broken-word.html': 1, 'acc-dont-move.html': 1, 'acc-one-signal.html': 1, 'acc-leader.html': 1, 'acc-change-rule.html': 1, 'acc-shapes-home.html': 1, 'acc-sort-treasures.html': 1, 'acc-build-city.html': 1};
       var toAr = function (n) { return String(n).replace(/\d/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'[d]; }); };
       var track = document.getElementById('track'), stage = document.getElementById('stage');
       var selTitle = document.getElementById('selTitle'), counter = document.getElementById('counter'), dotsEl = document.getElementById('dots');
@@ -221,7 +247,7 @@
         c.style.setProperty('--c', g[4]);
         c.style.animationDelay = (i * 0.05) + 's';
         c.innerHTML = '<span class="num">' + String(i + 1).padStart(2, '0') + '</span>' +
-          (NEW[g[0]] ? '<span class="badge">جديدة</span>' : '') +
+          (NEW[g[0]] ? '<span class="badge">جديدة</span>' : '') + (ACC[g[0]] ? '<span class="acc-badge">♿ ذوو الهمم</span>' : '') +
           '<div class="icon-wrap"><div class="icon">' + g[1] + '</div></div>' +
           '<div class="bottom"><div class="name">' + g[2] + '</div><div class="tag">' + g[3] + '</div></div>';
         c.addEventListener('click', function () { if (moved) return; if (i === active) open(); else go(i); });
